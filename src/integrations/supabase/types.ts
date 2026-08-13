@@ -14,7 +14,154 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      activity: {
+        Row: {
+          channel_id: string | null
+          country: string | null
+          created_at: string
+          event_type: string
+          id: string
+          platform: string | null
+          user_id: string | null
+        }
+        Insert: {
+          channel_id?: string | null
+          country?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          platform?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          channel_id?: string | null
+          country?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          platform?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channels: {
+        Row: {
+          avatar_url: string | null
+          channel_url: string
+          created_at: string
+          followers: number
+          id: string
+          is_live: boolean
+          last_checked_at: string | null
+          platform: string
+          updated_at: string
+          user_id: string
+          username: string
+          verified: boolean
+          viewer_count: number
+        }
+        Insert: {
+          avatar_url?: string | null
+          channel_url: string
+          created_at?: string
+          followers?: number
+          id?: string
+          is_live?: boolean
+          last_checked_at?: string | null
+          platform?: string
+          updated_at?: string
+          user_id: string
+          username: string
+          verified?: boolean
+          viewer_count?: number
+        }
+        Update: {
+          avatar_url?: string | null
+          channel_url?: string
+          created_at?: string
+          followers?: number
+          id?: string
+          is_live?: boolean
+          last_checked_at?: string | null
+          platform?: string
+          updated_at?: string
+          user_id?: string
+          username?: string
+          verified?: boolean
+          viewer_count?: number
+        }
+        Relationships: []
+      }
+      clicks: {
+        Row: {
+          channel_id: string
+          converted: boolean
+          country: string | null
+          country_code: string | null
+          created_at: string
+          id: string
+          referrer: string | null
+          source_domain: string | null
+        }
+        Insert: {
+          channel_id: string
+          converted?: boolean
+          country?: string | null
+          country_code?: string | null
+          created_at?: string
+          id?: string
+          referrer?: string | null
+          source_domain?: string | null
+        }
+        Update: {
+          channel_id?: string
+          converted?: boolean
+          country?: string | null
+          country_code?: string | null
+          created_at?: string
+          id?: string
+          referrer?: string | null
+          source_domain?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clicks_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
