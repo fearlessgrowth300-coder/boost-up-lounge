@@ -61,7 +61,9 @@ function AuthPage() {
       const raw = error instanceof Error ? error.message : "Authentication failed";
       const message = /weak|pwned|known to be weak/i.test(raw)
         ? "That password has appeared in known data breaches. Please pick a stronger, unique password."
-        : raw;
+        : /email not confirmed/i.test(raw)
+          ? "Your email isn't confirmed yet. Tap 'No account? Sign up' and submit the same email and password once to activate it."
+          : raw;
       setErrorMsg(message);
       toast.error(message);
     } finally {
