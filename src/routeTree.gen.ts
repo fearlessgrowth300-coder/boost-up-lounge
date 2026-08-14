@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ChannelPreviewIdRouteImport } from './routes/channel-preview.$id'
 import { Route as PIdRouteImport } from './routes/p.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +30,11 @@ const DashboardRoute = DashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChannelPreviewIdRoute = ChannelPreviewIdRouteImport.update({
+  id: '/channel-preview/$id',
+  path: '/channel-preview/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PIdRoute = PIdRouteImport.update({
   id: '/p/$id',
   path: '/p/$id',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
+  '/channel-preview/$id': typeof ChannelPreviewIdRoute
   '/p/$id': typeof PIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
+  '/channel-preview/$id': typeof ChannelPreviewIdRoute
   '/p/$id': typeof PIdRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,28 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
+  '/channel-preview/$id': typeof ChannelPreviewIdRoute
   '/p/$id': typeof PIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/dashboard' | '/p/$id'
+  fullPaths: '/' | '/auth' | '/dashboard' | '/channel-preview/$id' | '/p/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/dashboard' | '/p/$id'
-  id: '__root__' | '/' | '/auth' | '/dashboard' | '/p/$id'
+  to: '/' | '/auth' | '/dashboard' | '/channel-preview/$id' | '/p/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/channel-preview/$id'
+    | '/p/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
   DashboardRoute: typeof DashboardRoute
+  ChannelPreviewIdRoute: typeof ChannelPreviewIdRoute
   PIdRoute: typeof PIdRoute
 }
 
@@ -92,6 +108,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/channel-preview/$id': {
+      id: '/channel-preview/$id'
+      path: '/channel-preview/$id'
+      fullPath: '/channel-preview/$id'
+      preLoaderRoute: typeof ChannelPreviewIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/p/$id': {
       id: '/p/$id'
       path: '/p/$id'
@@ -106,6 +129,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
   DashboardRoute: DashboardRoute,
+  ChannelPreviewIdRoute: ChannelPreviewIdRoute,
   PIdRoute: PIdRoute,
 }
 export const routeTree = rootRouteImport
