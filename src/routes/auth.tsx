@@ -26,6 +26,8 @@ function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [checkEmail, setCheckEmail] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -36,21 +38,32 @@ function AuthPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
+    setErrorMsg(null);
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: { emailRedirectTo: `${window.location.origin}/dashboard` },
         });
         if (error) throw error;
+        if (!data.session) {
+          setCheckEmail(true);
+          toast.success("Account created — check your email to confirm.");
+          return;
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
       navigate({ to: "/dashboard" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Authentication failed");
+      const raw = error instanceof Error ? error.message : "Authentication failed";
+      const message = /weak|pwned|known to be weak/i.test(raw)
+        ? "That password has appeared in known data breaches. Please pick a stronger, unique password."
+        : raw;
+      setErrorMsg(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -65,6 +78,16 @@ function AuthPage() {
         <h1 className="font-display text-2xl font-extrabold">
           {mode === "signin" ? "Welcome back" : "Create your account"}
         </h1>
+        {errorMsg ? (
+          <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {errorMsg}
+          </p>
+        ) : null}
+        {checkEmail ? (
+          <p className="rounded-lg border border-neon/40 bg-neon/10 px-4 py-3 text-sm text-neon">
+            Confirmation email sent to {email}. Click the link, then sign in.
+          </p>
+        ) : null}
         <div className="space-y-2">
           <label className="block text-sm font-semibold" htmlFor="email">Email</label>
           <input
