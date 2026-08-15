@@ -141,6 +141,53 @@ export const Route = createFileRoute("/p/$id")({
           console.warn("Promotion click could not be recorded", trackingError.message);
         }
 
+        if (!trackingError && process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const { count } = await supabaseAdmin
+            .from("clicks")
+            .select("id", { count: "exact", head: true })
+            .eq("channel_id", channel.id);
+          const total = count ?? 0;
+          const milestone = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
+            .filter((value) => value <= total)
+            .at(-1);
+          if (milestone) {
+            const { data: campaign } = await supabaseAdmin
+              .from("campaign_tokens")
+              .update({ delivery_clicks: total, last_delivery_milestone: milestone })
+              .eq("channel_id", channel.id)
+              .eq("status", "active")
+              .lt("last_delivery_milestone", milestone)
+              .select("id, user_id, notification_email")
+              .maybeSingle();
+            if (campaign) {
+              const { data: details } = await supabaseAdmin
+                .from("channels")
+                .select("username")
+                .eq("id", channel.id)
+                .single();
+              const { data: slug } = await supabaseAdmin
+                .from("channel_public_slugs")
+                .select("slug")
+                .eq("channel_id", channel.id)
+                .single();
+              const { sendNotification } = await import("@/lib/notifications.server");
+              await sendNotification({
+                event: "delivery_milestone",
+                eventKey: `delivery-${campaign.id}-${milestone}`,
+                to: campaign.notification_email,
+                channelId: channel.id,
+                campaignTokenId: campaign.id,
+                userId: campaign.user_id,
+                channelName: details?.username ?? "Twitch channel",
+                heading: `${milestone.toLocaleString()} campaign clicks delivered`,
+                message: `Your StreamBoost promotion link has reached ${milestone.toLocaleString()} verified tracked clicks.`,
+                actionPath: `/r/${encodeURIComponent(slug?.slug ?? details?.username ?? "channel")}`,
+              });
+            }
+          }
+        }
+
         return new Response(null, { status: 302, headers: { Location: channel.channel_url } });
       },
     },

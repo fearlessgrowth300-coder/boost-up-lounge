@@ -10,19 +10,16 @@ export const Route = createFileRoute("/go/$username")({
           process.env["SUPABASE_PUBLISHABLE_KEY"]!,
           { auth: { persistSession: false, autoRefreshToken: false } },
         );
-        const { data: channel } = await client
-          .from("channels")
-          .select("id")
-          .eq("platform", "twitch")
-          .ilike("username", params.username)
-          .order("updated_at", { ascending: false })
-          .limit(1)
+        const { data: slug } = await client
+          .from("channel_public_slugs")
+          .select("channel_id")
+          .eq("slug", params.username.toLowerCase())
           .maybeSingle();
-        if (!channel) return new Response("Channel not found", { status: 404 });
+        if (!slug) return new Response("Channel not found", { status: 404 });
         const url = new URL(request.url);
         return new Response(null, {
           status: 307,
-          headers: { Location: `${url.origin}/p/${channel.id}` },
+          headers: { Location: `${url.origin}/p/${slug.channel_id}` },
         });
       },
     },

@@ -44,6 +44,53 @@ const bulkUrlInput = z.object({
   urls: z.array(z.string().min(4).max(300)).min(1).max(25),
 });
 
+function accountEmail(claims: Record<string, unknown>) {
+  return typeof claims.email === "string" ? claims.email : null;
+}
+
+async function notifyChannelImprovement(input: {
+  supabase: any;
+  userId: string;
+  channelId: string;
+  username: string;
+  oldFollowers: number;
+  newFollowers: number;
+  oldHealth: number;
+  newHealth: number;
+}) {
+  if (input.newFollowers <= input.oldFollowers && input.newHealth <= input.oldHealth) return;
+  const { data: campaign } = await input.supabase
+    .from("campaign_tokens")
+    .select("id, notification_email")
+    .eq("channel_id", input.channelId)
+    .in("status", ["active", "completed"])
+    .order("activated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!campaign?.notification_email) return;
+  const changes = [
+    input.newFollowers > input.oldFollowers
+      ? `Followers increased from ${input.oldFollowers.toLocaleString()} to ${input.newFollowers.toLocaleString()}.`
+      : null,
+    input.newHealth > input.oldHealth
+      ? `Health Score improved from ${input.oldHealth}% to ${input.newHealth}%.`
+      : null,
+  ].filter(Boolean);
+  const { sendNotification } = await import("./notifications.server");
+  await sendNotification({
+    event: "channel_improved",
+    eventKey: `channel-improved-${input.channelId}-${input.newFollowers}-${input.newHealth}`,
+    to: campaign.notification_email,
+    channelId: input.channelId,
+    campaignTokenId: campaign.id,
+    userId: input.userId,
+    channelName: input.username,
+    heading: "Your channel is improving",
+    message: changes.join(" "),
+    actionPath: `/r/${encodeURIComponent(input.username.toLowerCase())}`,
+  });
+}
+
 export const submitChannel = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => urlInput.parse(data))
@@ -188,7 +235,20 @@ export const listChannels = createServerFn({ method: "GET" })
       .eq("user_id", context.userId)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return data ?? [];
+    const channels = data ?? [];
+    if (!channels.length) return channels;
+    const { data: slugs } = await context.supabase
+      .from("channel_public_slugs")
+      .select("channel_id, slug")
+      .in(
+        "channel_id",
+        channels.map((channel) => channel.id),
+      );
+    const slugByChannel = new Map((slugs ?? []).map((row) => [row.channel_id, row.slug]));
+    return channels.map((channel) => ({
+      ...channel,
+      public_slug: slugByChannel.get(channel.id) ?? channel.username.toLowerCase(),
+    }));
   });
 
 export const listChannelSnapshots = createServerFn({ method: "GET" })
@@ -213,7 +273,7 @@ export const listGrowthWorkspace = createServerFn({ method: "GET" })
       context.supabase
         .from("campaign_tokens")
         .select(
-          "id, channel_id, token_preview, status, fiverr_order_reference, issued_at, activated_at, payment_verified_at, payment_verified_by, revoked_at, revocation_reason",
+          "id, channel_id, token_preview, status, fiverr_order_reference, notification_email, issued_at, activated_at, campaign_started_at, completed_at, delivery_clicks, last_delivery_milestone, payment_verified_at, payment_verified_by, revoked_at, revocation_reason",
         )
         .eq("user_id", context.userId)
         .order("issued_at", { ascending: false }),
@@ -228,11 +288,72 @@ export const listGrowthWorkspace = createServerFn({ method: "GET" })
     };
   });
 
+export const recordPaymentAwaitingVerification = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z
+      .object({
+        channelId: z.string().uuid(),
+        fiverrOrderReference: z.string().min(2).max(120),
+        notificationEmail: z.string().email().max(320),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const orderReference = data.fiverrOrderReference.trim().replace(/^#/, "").toUpperCase();
+    const { data: channel } = await context.supabase
+      .from("channels")
+      .select("id, username")
+      .eq("id", data.channelId)
+      .eq("user_id", context.userId)
+      .single();
+    if (!channel) throw new Error("Channel was not found.");
+    const { data: existing } = await context.supabase
+      .from("campaign_tokens")
+      .select("id")
+      .ilike("fiverr_order_reference", orderReference)
+      .neq("status", "revoked")
+      .limit(1)
+      .maybeSingle();
+    if (existing) throw new Error("This Fiverr order reference has already been recorded.");
+    const { data: pending, error } = await context.supabase
+      .from("campaign_tokens")
+      .insert({
+        channel_id: channel.id,
+        user_id: context.userId,
+        token_hash: await sha256(`pending:${secureTokenPart()}`),
+        token_preview: "Awaiting verification",
+        fiverr_order_reference: orderReference,
+        notification_email: data.notificationEmail.trim().toLowerCase(),
+        status: "awaiting_verification",
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    const { sendNotification } = await import("./notifications.server");
+    await sendNotification({
+      event: "payment_awaiting_verification",
+      eventKey: `payment-awaiting-${pending.id}`,
+      to: data.notificationEmail,
+      channelId: channel.id,
+      campaignTokenId: pending.id,
+      userId: context.userId,
+      channelName: channel.username,
+      heading: "Payment awaiting verification",
+      message: `We received Fiverr order #${orderReference}. StreamBoost is verifying the payment before issuing the private campaign token.`,
+    });
+    return { ok: true };
+  });
+
 export const generateCampaignToken = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) =>
     z
-      .object({ channelId: z.string().uuid(), fiverrOrderReference: z.string().min(2).max(120) })
+      .object({
+        channelId: z.string().uuid(),
+        fiverrOrderReference: z.string().min(2).max(120),
+        notificationEmail: z.string().email().max(320).optional(),
+      })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
@@ -247,7 +368,7 @@ export const generateCampaignToken = createServerFn({ method: "POST" })
 
     const { data: active } = await context.supabase
       .from("campaign_tokens")
-      .select("id")
+      .select("id, status, notification_email")
       .eq("channel_id", channel.id)
       .eq("status", "active")
       .maybeSingle();
@@ -255,13 +376,14 @@ export const generateCampaignToken = createServerFn({ method: "POST" })
 
     const { data: existingOrder, error: orderError } = await context.supabase
       .from("campaign_tokens")
-      .select("id")
+      .select("id, status, notification_email")
       .ilike("fiverr_order_reference", orderReference)
       .neq("status", "revoked")
       .limit(1)
       .maybeSingle();
     if (orderError) throw new Error(orderError.message);
-    if (existingOrder) throw new Error("This Fiverr order reference has already been used.");
+    if (existingOrder && existingOrder.status !== "awaiting_verification")
+      throw new Error("This Fiverr order reference has already been used.");
 
     await context.supabase
       .from("campaign_tokens")
@@ -270,16 +392,46 @@ export const generateCampaignToken = createServerFn({ method: "POST" })
       .eq("status", "issued");
 
     const token = `${channelTokenName(channel.username)}-SB-${secureTokenPart()}`;
-    const { error } = await context.supabase.from("campaign_tokens").insert({
+    const notificationEmail =
+      data.notificationEmail?.trim().toLowerCase() ??
+      existingOrder?.notification_email ??
+      accountEmail(context.claims as Record<string, unknown>);
+    const tokenRow = {
       channel_id: channel.id,
       user_id: context.userId,
       token_hash: await sha256(token),
       token_preview: `${token.slice(0, 18)}••••${token.slice(-6)}`,
       fiverr_order_reference: orderReference,
+      notification_email: notificationEmail,
+      status: "issued",
+      issued_at: new Date().toISOString(),
       payment_verified_at: new Date().toISOString(),
       payment_verified_by: context.userId,
-    });
+    };
+    const result = existingOrder
+      ? await context.supabase
+          .from("campaign_tokens")
+          .update(tokenRow)
+          .eq("id", existingOrder.id)
+          .select("id")
+          .single()
+      : await context.supabase.from("campaign_tokens").insert(tokenRow).select("id").single();
+    const { error } = result;
     if (error) throw new Error(error.message);
+    const { sendNotification } = await import("./notifications.server");
+    await sendNotification({
+      event: "token_issued",
+      eventKey: `token-issued-${result.data.id}`,
+      to: notificationEmail,
+      channelId: channel.id,
+      campaignTokenId: result.data.id,
+      userId: context.userId,
+      channelName: channel.username,
+      heading: "Campaign token issued",
+      message:
+        "Your payment has been verified and your unique StreamBoost campaign token is ready. Keep it private and activate it from your public report.",
+      actionPath: `/r/${encodeURIComponent(channel.username.toLowerCase())}`,
+    });
     return { token };
   });
 
@@ -303,6 +455,42 @@ export const revokeCampaignToken = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!token) throw new Error("Token was not found or is already revoked.");
+    return { ok: true };
+  });
+
+export const completeCampaign = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => z.object({ tokenId: z.string().uuid() }).parse(data))
+  .handler(async ({ data, context }) => {
+    const { data: token, error } = await context.supabase
+      .from("campaign_tokens")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", data.tokenId)
+      .eq("user_id", context.userId)
+      .eq("status", "active")
+      .select("id, channel_id, notification_email, delivery_clicks")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!token) throw new Error("Only an active campaign can be completed.");
+    const { data: channel } = await context.supabase
+      .from("channels")
+      .select("username")
+      .eq("id", token.channel_id)
+      .single();
+    const username = channel?.username ?? "Twitch channel";
+    const { sendNotification } = await import("./notifications.server");
+    await sendNotification({
+      event: "campaign_completed",
+      eventKey: `campaign-completed-${token.id}`,
+      to: token.notification_email,
+      channelId: token.channel_id,
+      campaignTokenId: token.id,
+      userId: context.userId,
+      channelName: username,
+      heading: "Campaign completed",
+      message: `Your StreamBoost campaign has completed with ${token.delivery_clicks ?? 0} tracked delivery clicks. Your report remains available for review.`,
+      actionPath: `/r/${encodeURIComponent(username.toLowerCase())}`,
+    });
     return { ok: true };
   });
 
@@ -339,6 +527,42 @@ export const activateCampaignToken = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (result === "invalid") throw new Error("This campaign token was not issued by StreamBoost.");
     if (result === "revoked") throw new Error("This campaign token has been revoked.");
+    if (result !== "already_active" && process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: campaign } = await supabaseAdmin
+        .from("campaign_tokens")
+        .update({ campaign_started_at: new Date().toISOString() })
+        .eq("channel_id", data.channelId)
+        .eq("token_hash", tokenHash)
+        .select("id, user_id, notification_email")
+        .single();
+      if (campaign) {
+        const { sendNotification } = await import("./notifications.server");
+        const common = {
+          to: campaign.notification_email,
+          channelId: data.channelId,
+          campaignTokenId: campaign.id,
+          userId: campaign.user_id,
+          channelName: channel.username,
+          actionPath: `/r/${encodeURIComponent(channel.username.toLowerCase())}`,
+        };
+        await sendNotification({
+          ...common,
+          event: "token_activated",
+          eventKey: `token-activated-${campaign.id}`,
+          heading: "Token activated",
+          message: "Your private StreamBoost token was accepted successfully.",
+        });
+        await sendNotification({
+          ...common,
+          event: "campaign_started",
+          eventKey: `campaign-started-${campaign.id}`,
+          heading: "Campaign started",
+          message:
+            "Your promotion campaign is active. Delivery and channel-growth milestones will be emailed automatically.",
+        });
+      }
+    }
     return { ok: true, alreadyActive: result === "already_active" };
   });
 
@@ -419,7 +643,7 @@ export const refreshChannel = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: row, error } = await context.supabase
       .from("channels")
-      .select("id, platform, username")
+      .select("id, platform, username, followers")
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .single();
@@ -447,6 +671,14 @@ export const refreshChannel = createServerFn({ method: "POST" })
       })
       .eq("id", row.id);
     if (updateError) throw new Error(`Channel data could not be saved: ${updateError.message}`);
+    const metrics = snapshotIssueMetrics(stats);
+    const { data: previousSnapshot } = await context.supabase
+      .from("channel_snapshots")
+      .select("health_score")
+      .eq("channel_id", row.id)
+      .order("recorded_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     await context.supabase.from("channel_snapshots").insert({
       channel_id: row.id,
       user_id: context.userId,
@@ -454,7 +686,17 @@ export const refreshChannel = createServerFn({ method: "POST" })
       viewer_count: stats.viewers,
       is_live: stats.isLive,
       recent_broadcasts: stats.recentVideos.length,
-      ...snapshotIssueMetrics(stats),
+      ...metrics,
+    });
+    await notifyChannelImprovement({
+      supabase: context.supabase,
+      userId: context.userId,
+      channelId: row.id,
+      username: row.username,
+      oldFollowers: row.followers ?? 0,
+      newFollowers: stats.followers,
+      oldHealth: previousSnapshot?.health_score ?? metrics.health_score,
+      newHealth: metrics.health_score,
     });
     return stats;
   });
@@ -465,7 +707,7 @@ export const autoRefreshChannels = createServerFn({ method: "POST" })
     const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const { data: channels, error } = await context.supabase
       .from("channels")
-      .select("id, platform, username, last_checked_at")
+      .select("id, platform, username, followers, last_checked_at")
       .eq("user_id", context.userId)
       .or(`last_checked_at.is.null,last_checked_at.lt.${staleBefore}`)
       .order("last_checked_at", { ascending: true, nullsFirst: true })
@@ -500,6 +742,14 @@ export const autoRefreshChannels = createServerFn({ method: "POST" })
           .eq("id", channel.id)
           .eq("user_id", context.userId);
         if (updateError) throw updateError;
+        const metrics = snapshotIssueMetrics(stats);
+        const { data: previousSnapshot } = await context.supabase
+          .from("channel_snapshots")
+          .select("health_score")
+          .eq("channel_id", channel.id)
+          .order("recorded_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
         const { error: snapshotError } = await context.supabase.from("channel_snapshots").insert({
           channel_id: channel.id,
           user_id: context.userId,
@@ -507,9 +757,19 @@ export const autoRefreshChannels = createServerFn({ method: "POST" })
           viewer_count: stats.viewers,
           is_live: stats.isLive,
           recent_broadcasts: stats.recentVideos.length,
-          ...snapshotIssueMetrics(stats),
+          ...metrics,
         });
         if (snapshotError) throw snapshotError;
+        await notifyChannelImprovement({
+          supabase: context.supabase,
+          userId: context.userId,
+          channelId: channel.id,
+          username: channel.username,
+          oldFollowers: channel.followers ?? 0,
+          newFollowers: stats.followers,
+          oldHealth: previousSnapshot?.health_score ?? metrics.health_score,
+          newHealth: metrics.health_score,
+        });
         updated += 1;
       } catch (refreshError) {
         failures.push(
@@ -582,14 +842,19 @@ export const getPublicReport = createServerFn({ method: "GET" })
         "id, platform, username, channel_url, followers, is_live, viewer_count, avatar_url, banner_url, description, current_category, current_title, recent_categories, recent_videos, schedule_segments, verified, last_checked_at",
       );
     const uuid = z.string().uuid().safeParse(data.identifier);
-    const { data: channel } = uuid.success
-      ? await channelQuery.eq("id", uuid.data).maybeSingle()
-      : await channelQuery
-          .eq("platform", "twitch")
-          .ilike("username", data.identifier)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+    let channel = null;
+    if (uuid.success) {
+      ({ data: channel } = await channelQuery.eq("id", uuid.data).maybeSingle());
+    } else {
+      const { data: slugRow } = await client
+        .from("channel_public_slugs")
+        .select("channel_id")
+        .eq("slug", data.identifier.toLowerCase())
+        .maybeSingle();
+      if (slugRow) {
+        ({ data: channel } = await channelQuery.eq("id", slugRow.channel_id).maybeSingle());
+      }
+    }
     if (!channel) return null;
     const channelId = channel.id;
 

@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, CheckCircle2, ExternalLink, KeyRound, Radio, Users } from "lucide-react";
+import { Ban, CheckCircle2, ExternalLink, Flag, KeyRound, Radio, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/sb/app-header";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import {
+  completeCampaign,
   listChannels,
   listGrowthWorkspace,
   revokeCampaignToken,
@@ -20,6 +21,7 @@ function AdminPage() {
   const channelsFn = useServerFn(listChannels);
   const workspaceFn = useServerFn(listGrowthWorkspace);
   const revokeFn = useServerFn(revokeCampaignToken);
+  const completeFn = useServerFn(completeCampaign);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const { data: channels = [] } = useQuery({
     queryKey: ["channels"],
@@ -37,6 +39,14 @@ function AdminPage() {
       revokeFn({ data: { tokenId, reason } }),
     onSuccess: async () => {
       toast.success("Campaign token revoked.");
+      await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const complete = useMutation({
+    mutationFn: (tokenId: string) => completeFn({ data: { tokenId } }),
+    onSuccess: async () => {
+      toast.success("Campaign completed and the streamer was notified.");
       await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
     },
     onError: (error) => toast.error(error.message),
@@ -96,7 +106,11 @@ function AdminPage() {
                     <p className="mt-2 text-xs text-muted-foreground">{token.token_preview}</p>
                     <Link
                       to="/r/$username"
-                      params={{ username }}
+                      params={{
+                        username:
+                          channels.find((channel) => channel.id === token.channel_id)
+                            ?.public_slug ?? username.toLowerCase(),
+                      }}
                       className="mt-2 inline-block text-xs font-bold text-neon"
                     >
                       Open public report
@@ -126,8 +140,19 @@ function AdminPage() {
                       </p>
                     ) : null}
                   </div>
-                  {token.status !== "revoked" ? (
-                    <div className="flex gap-2 lg:w-72">
+                  {token.status !== "revoked" && token.status !== "completed" ? (
+                    <div className="flex gap-2 lg:w-80">
+                      {token.status === "active" ? (
+                        <button
+                          type="button"
+                          disabled={complete.isPending}
+                          onClick={() => complete.mutate(token.id)}
+                          className="rounded-lg border border-neon/50 px-3 py-2 text-neon disabled:opacity-40"
+                          aria-label={`Complete campaign for ${username}`}
+                        >
+                          <Flag className="size-4" />
+                        </button>
+                      ) : null}
                       <input
                         value={reasons[token.id] ?? ""}
                         onChange={(event) =>

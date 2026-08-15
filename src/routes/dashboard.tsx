@@ -40,6 +40,7 @@ import {
   listGrowthWorkspace,
   listChannelSnapshots,
   listChannels,
+  recordPaymentAwaitingVerification,
   refreshChannel,
   saveChannelWorkspace,
   saveIssueProgress,
@@ -60,7 +61,7 @@ export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
 });
 
-type Channel = Tables<"channels">;
+type Channel = Tables<"channels"> & { public_slug?: string };
 type Click = Tables<"clicks">;
 type ChannelSnapshot = Tables<"channel_snapshots">;
 type IssueProgress = Tables<"channel_issue_progress">;
@@ -352,9 +353,12 @@ function ChannelAnalysis({
 }) {
   const queryClient = useQueryClient();
   const generateTokenFn = useServerFn(generateCampaignToken);
+  const recordPaymentFn = useServerFn(recordPaymentAwaitingVerification);
   const [fiverrOrderReference, setFiverrOrderReference] = useState("");
+  const [notificationEmail, setNotificationEmail] = useState("");
   const [generatedToken, setGeneratedToken] = useState("");
   const [generatingToken, setGeneratingToken] = useState(false);
+  const [recordingPayment, setRecordingPayment] = useState(false);
   const [workspaceDraft, setWorkspaceDraft] = useState({
     tags: workspace?.tags.join(", ") ?? "",
     notes: workspace?.owner_notes ?? "",
@@ -371,8 +375,9 @@ function ChannelAnalysis({
   }, [workspace]);
   const host = typeof window === "undefined" ? "localhost" : window.location.hostname;
   const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const promoUrl = `${origin}/go/${encodeURIComponent(channel.username)}`;
-  const reportUrl = `${origin}/r/${encodeURIComponent(channel.username)}`;
+  const publicSlug = channel.public_slug ?? channel.username.toLowerCase();
+  const promoUrl = `${origin}/go/${encodeURIComponent(publicSlug)}`;
+  const reportUrl = `${origin}/r/${encodeURIComponent(publicSlug)}`;
   const followers = channel.followers ?? 0;
   const twitchPlayer = `https://player.twitch.tv/?channel=${encodeURIComponent(channel.username)}&parent=${encodeURIComponent(host)}`;
   const twitchChat = `https://www.twitch.tv/embed/${encodeURIComponent(channel.username)}/chat?parent=${encodeURIComponent(host)}&darkpopout`;
@@ -1013,15 +1018,56 @@ function ChannelAnalysis({
               Owner only
             </span>
           </div>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <input
               value={fiverrOrderReference}
               onChange={(event) => setFiverrOrderReference(event.target.value)}
               placeholder="Fiverr order reference"
               className="min-w-0 flex-1 rounded-lg border border-border bg-input px-4 py-2.5 text-sm"
             />
+            <input
+              type="email"
+              value={notificationEmail}
+              onChange={(event) => setNotificationEmail(event.target.value)}
+              placeholder="Streamer notification email"
+              className="min-w-0 flex-1 rounded-lg border border-border bg-input px-4 py-2.5 text-sm"
+            />
             <button
-              disabled={generatingToken || fiverrOrderReference.trim().length < 2}
+              disabled={
+                recordingPayment ||
+                fiverrOrderReference.trim().length < 2 ||
+                !notificationEmail.includes("@")
+              }
+              onClick={async () => {
+                setRecordingPayment(true);
+                try {
+                  await recordPaymentFn({
+                    data: {
+                      channelId: channel.id,
+                      fiverrOrderReference: fiverrOrderReference.trim(),
+                      notificationEmail: notificationEmail.trim(),
+                    },
+                  });
+                  await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
+                  toast.success("Payment recorded and verification email queued");
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error ? error.message : "Payment could not be recorded",
+                  );
+                } finally {
+                  setRecordingPayment(false);
+                }
+              }}
+              className="rounded-lg border border-orange/50 px-5 py-2.5 text-sm font-bold text-orange disabled:opacity-50"
+            >
+              {recordingPayment ? "Recording…" : "Record Awaiting Verification"}
+            </button>
+            <button
+              disabled={
+                generatingToken ||
+                fiverrOrderReference.trim().length < 2 ||
+                !notificationEmail.includes("@")
+              }
               onClick={async () => {
                 setGeneratingToken(true);
                 try {
@@ -1029,6 +1075,7 @@ function ChannelAnalysis({
                     data: {
                       channelId: channel.id,
                       fiverrOrderReference: fiverrOrderReference.trim(),
+                      notificationEmail: notificationEmail.trim() || undefined,
                     },
                   });
                   setGeneratedToken(result.token);
@@ -1042,7 +1089,7 @@ function ChannelAnalysis({
               }}
               className="rounded-lg bg-orange px-5 py-2.5 text-sm font-bold text-background disabled:opacity-50"
             >
-              {generatingToken ? "Generating…" : "Generate Secure Token"}
+              {generatingToken ? "Issuing…" : "Verify & Issue Token"}
             </button>
           </div>
           {generatedToken ? (

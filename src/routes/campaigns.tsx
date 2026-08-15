@@ -42,8 +42,9 @@ function CampaignsPage() {
             const token = growth?.tokens.find(
               (item) => item.channel_id === channel.id && item.status !== "revoked",
             );
-            const promo = `${window.location.origin}/go/${encodeURIComponent(channel.username)}`;
-            const report = `${window.location.origin}/r/${encodeURIComponent(channel.username)}`;
+            const slug = channel.public_slug ?? channel.username.toLowerCase();
+            const promo = `${window.location.origin}/go/${encodeURIComponent(slug)}`;
+            const report = `${window.location.origin}/r/${encodeURIComponent(slug)}`;
             return (
               <article key={channel.id} className="sb-card p-6">
                 <div className="flex items-center justify-between gap-3">
@@ -67,14 +68,14 @@ function CampaignsPage() {
                     icon={FileText}
                     label="Streamer Report"
                     description="Send this to the streamer"
-                    display={`/r/${channel.username}`}
+                    display={`/r/${slug}`}
                     value={report}
                   />
                   <LinkCard
                     icon={MousePointerClick}
                     label="Promotion Link"
                     description="Tracks visits before Twitch opens"
-                    display={`/go/${channel.username}`}
+                    display={`/go/${slug}`}
                     value={promo}
                   />
                 </div>

@@ -83,7 +83,7 @@ function ProgressPage() {
                     </div>
                   </div>
                   <a
-                    href={`/r/${encodeURIComponent(channel.username)}`}
+                    href={`/r/${encodeURIComponent(channel.public_slug ?? channel.username.toLowerCase())}`}
                     target="_blank"
                     rel="noreferrer"
                     className="rounded-lg border border-neon px-4 py-2 text-sm font-bold text-neon"

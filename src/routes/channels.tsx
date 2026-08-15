@@ -65,7 +65,7 @@ function ChannelsPage() {
             const completed = (growth?.progress ?? [])
               .filter((item) => item.channel_id === channel.id && item.completed)
               .map((item) => item.issue_id);
-            const reportUrl = `${window.location.origin}/r/${encodeURIComponent(channel.username)}`;
+            const reportUrl = `${window.location.origin}/r/${encodeURIComponent(channel.public_slug ?? channel.username.toLowerCase())}`;
             return (
               <article key={channel.id} className="sb-card overflow-hidden">
                 {channel.banner_url ? (
