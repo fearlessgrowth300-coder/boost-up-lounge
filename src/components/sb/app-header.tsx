@@ -1,7 +1,9 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { Download } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { autoRefreshChannels } from "@/lib/streamboost.functions";
 import { Logo } from "./logo";
@@ -13,6 +15,67 @@ const APP_LINKS = [
   { label: "Campaigns", to: "/campaigns" },
   { label: "Admin", to: "/admin" },
 ] as const;
+
+interface InstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
+function InstallAppButton() {
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches;
+    setInstalled(standalone || ("standalone" in navigator && Boolean(navigator.standalone)));
+
+    const capturePrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const markInstalled = () => {
+      setInstalled(true);
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", capturePrompt);
+    window.addEventListener("appinstalled", markInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", capturePrompt);
+      window.removeEventListener("appinstalled", markInstalled);
+    };
+  }, []);
+
+  if (installed) return null;
+
+  const install = async () => {
+    if (installPrompt) {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === "accepted") setInstallPrompt(null);
+      return;
+    }
+
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    toast.info(
+      isIos
+        ? "On iPhone: tap Share, then choose Add to Home Screen."
+        : "Open your browser menu and choose Install app or Add to Home screen.",
+      { duration: 7000 },
+    );
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={install}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-neon/60 px-3 py-2 text-xs font-bold text-neon transition hover:bg-neon hover:text-primary-foreground"
+    >
+      <Download className="size-3.5" />
+      Install App
+    </button>
+  );
+}
 
 export function AppHeader() {
   const navigate = useNavigate();
@@ -68,6 +131,7 @@ export function AppHeader() {
           ))}
         </nav>
         <div className="flex gap-2">
+          <InstallAppButton />
           <Link
             to="/"
             className="rounded-lg border border-border px-3 py-2 text-xs font-semibold hover:border-neon"
