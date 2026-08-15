@@ -93,7 +93,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "Analyze Twitch channel health, track growth and manage promotion campaigns with StreamBoost.",
       },
       { property: "og:type", content: "website" },
+      {
+        property: "og:image",
+        content: "https://boost-up-lounge.vercel.app/streamboost-social.png",
+      },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { property: "og:image:alt", content: "StreamBoost Twitch Channel Growth Report" },
       { name: "twitter:card", content: "summary_large_image" },
+      {
+        name: "twitter:image",
+        content: "https://boost-up-lounge.vercel.app/streamboost-social.png",
+      },
       { name: "twitter:title", content: "StreamBoost — Amplify Your Gaming Streams" },
       {
         name: "twitter:description",
@@ -106,7 +117,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/streamboost-icon.svg", type: "image/svg+xml" },
     ],
   }),
   shellComponent: RootShell,
