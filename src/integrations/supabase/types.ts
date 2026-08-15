@@ -64,6 +64,8 @@ export type Database = {
           platform: string;
           recent_categories: Json;
           recent_videos: Json;
+          schedule_segments: Json;
+          schedule_vacation: Json | null;
           updated_at: string;
           user_id: string;
           username: string;
@@ -87,6 +89,8 @@ export type Database = {
           platform?: string;
           recent_categories?: Json;
           recent_videos?: Json;
+          schedule_segments?: Json;
+          schedule_vacation?: Json | null;
           updated_at?: string;
           user_id: string;
           username: string;
@@ -110,11 +114,177 @@ export type Database = {
           platform?: string;
           recent_categories?: Json;
           recent_videos?: Json;
+          schedule_segments?: Json;
+          schedule_vacation?: Json | null;
           updated_at?: string;
           user_id?: string;
           username?: string;
           verified?: boolean;
           viewer_count?: number;
+        };
+        Relationships: [];
+      };
+      channel_snapshots: {
+        Row: {
+          channel_id: string;
+          followers: number;
+          health_score: number;
+          id: string;
+          is_live: boolean;
+          issue_count: number;
+          recent_broadcasts: number;
+          recorded_at: string;
+          user_id: string;
+          viewer_count: number;
+        };
+        Insert: {
+          channel_id: string;
+          followers?: number;
+          health_score?: number;
+          id?: string;
+          is_live?: boolean;
+          issue_count?: number;
+          recent_broadcasts?: number;
+          recorded_at?: string;
+          user_id: string;
+          viewer_count?: number;
+        };
+        Update: {
+          channel_id?: string;
+          followers?: number;
+          health_score?: number;
+          id?: string;
+          is_live?: boolean;
+          issue_count?: number;
+          recent_broadcasts?: number;
+          recorded_at?: string;
+          user_id?: string;
+          viewer_count?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "channel_snapshots_channel_id_fkey";
+            columns: ["channel_id"];
+            isOneToOne: false;
+            referencedRelation: "channels";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      channel_issue_progress: {
+        Row: {
+          channel_id: string;
+          completed: boolean;
+          completed_at: string | null;
+          evidence_url: string | null;
+          id: string;
+          issue_id: string;
+          notes: string | null;
+          target_date: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          channel_id: string;
+          completed?: boolean;
+          completed_at?: string | null;
+          evidence_url?: string | null;
+          id?: string;
+          issue_id: string;
+          notes?: string | null;
+          target_date?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          channel_id?: string;
+          completed?: boolean;
+          completed_at?: string | null;
+          evidence_url?: string | null;
+          id?: string;
+          issue_id?: string;
+          notes?: string | null;
+          target_date?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      channel_workspace: {
+        Row: {
+          channel_id: string;
+          follow_up_at: string | null;
+          monitoring_enabled: boolean;
+          owner_notes: string | null;
+          tags: string[];
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          channel_id: string;
+          follow_up_at?: string | null;
+          monitoring_enabled?: boolean;
+          owner_notes?: string | null;
+          tags?: string[];
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          channel_id?: string;
+          follow_up_at?: string | null;
+          monitoring_enabled?: boolean;
+          owner_notes?: string | null;
+          tags?: string[];
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      campaign_tokens: {
+        Row: {
+          activated_at: string | null;
+          channel_id: string;
+          fiverr_order_reference: string | null;
+          id: string;
+          issued_at: string;
+          payment_verified_at: string | null;
+          payment_verified_by: string | null;
+          revoked_at: string | null;
+          revocation_reason: string | null;
+          status: string;
+          token_hash: string;
+          token_preview: string;
+          user_id: string;
+        };
+        Insert: {
+          activated_at?: string | null;
+          channel_id: string;
+          fiverr_order_reference?: string | null;
+          id?: string;
+          issued_at?: string;
+          payment_verified_at?: string | null;
+          payment_verified_by?: string | null;
+          revoked_at?: string | null;
+          revocation_reason?: string | null;
+          status?: string;
+          token_hash: string;
+          token_preview: string;
+          user_id: string;
+        };
+        Update: {
+          activated_at?: string | null;
+          channel_id?: string;
+          fiverr_order_reference?: string | null;
+          id?: string;
+          issued_at?: string;
+          payment_verified_at?: string | null;
+          payment_verified_by?: string | null;
+          revoked_at?: string | null;
+          revocation_reason?: string | null;
+          status?: string;
+          token_hash?: string;
+          token_preview?: string;
+          user_id?: string;
         };
         Relationships: [];
       };
@@ -200,6 +370,10 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      activate_campaign_token: {
+        Args: { p_channel_id: string; p_token_hash: string };
+        Returns: string;
+      };
       record_promo_click: {
         Args: {
           p_browser?: string | null;

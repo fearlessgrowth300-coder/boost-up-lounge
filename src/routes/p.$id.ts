@@ -3,6 +3,62 @@ import { z } from "zod";
 
 const COUNTRY_NAMES = new Intl.DisplayNames(["en"], { type: "region" });
 
+function validCountryCode(value: string | null) {
+  const code = value?.trim().toUpperCase() ?? null;
+  return code && code !== "XX" && /^[A-Z]{2}$/.test(code) ? code : null;
+}
+
+async function resolveCountry(request: Request) {
+  let code = validCountryCode(
+    request.headers.get("cf-ipcountry") ??
+      request.headers.get("x-vercel-ip-country") ??
+      request.headers.get("x-country-code"),
+  );
+  let country: string | null = null;
+
+  const forwardedIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  const candidateIp = forwardedIp || realIp;
+  const isLocalIp =
+    !candidateIp ||
+    candidateIp === "::1" ||
+    candidateIp === "127.0.0.1" ||
+    candidateIp.startsWith("10.") ||
+    candidateIp.startsWith("192.168.") ||
+    candidateIp.startsWith("172.");
+
+  if (!code) {
+    try {
+      const lookupUrl = isLocalIp
+        ? "https://ipwho.is/"
+        : `https://ipwho.is/${encodeURIComponent(candidateIp)}`;
+      const response = await fetch(lookupUrl, { signal: AbortSignal.timeout(2000) });
+      if (response.ok) {
+        const result = (await response.json()) as {
+          success?: boolean;
+          country?: string;
+          country_code?: string;
+        };
+        if (result.success !== false) {
+          code = validCountryCode(result.country_code ?? null);
+          country = result.country?.trim() || null;
+        }
+      }
+    } catch {
+      // Geographic enrichment is optional; never block the promotion redirect.
+    }
+  }
+
+  if (!country && code) {
+    try {
+      country = COUNTRY_NAMES.of(code) ?? code;
+    } catch {
+      country = code;
+    }
+  }
+  return { code, country };
+}
+
 function parseVisitDevice(userAgent: string) {
   const deviceType = /tablet|ipad/i.test(userAgent)
     ? "Tablet"
@@ -54,15 +110,7 @@ export const Route = createFileRoute("/p/$id")({
           .maybeSingle();
         if (!channel) return new Response("Not found", { status: 404 });
 
-        const code = request.headers.get("cf-ipcountry");
-        let country: string | null = null;
-        if (code && code !== "XX" && code.length === 2) {
-          try {
-            country = COUNTRY_NAMES.of(code) ?? code;
-          } catch {
-            country = code;
-          }
-        }
+        const { code, country } = await resolveCountry(request);
 
         const referrer = request.headers.get("referer");
         let sourceDomain: string | null = null;

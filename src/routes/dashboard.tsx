@@ -2,6 +2,10 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { geoEqualEarth, geoPath } from "d3-geo";
+import { feature } from "topojson-client";
+import type { GeometryCollection, Topology } from "topojson-specification";
+import worldAtlas from "world-atlas/countries-110m.json";
 import {
   Activity,
   AlertTriangle,
@@ -20,15 +24,25 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Logo } from "@/components/sb/logo";
+import { AppHeader } from "@/components/sb/app-header";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import {
+  buildGrowthAudit,
+  calculateHealthScore,
+  getAuditActionPlan,
+} from "@/lib/channel-growth-audit";
+import {
   createBulkCampaigns,
   deleteChannel,
+  generateCampaignToken,
   getDashboard,
+  listGrowthWorkspace,
+  listChannelSnapshots,
   listChannels,
   refreshChannel,
+  saveChannelWorkspace,
+  saveIssueProgress,
 } from "@/lib/streamboost.functions";
 
 const TITLE = "Dashboard — StreamBoost";
@@ -48,6 +62,9 @@ export const Route = createFileRoute("/dashboard")({
 
 type Channel = Tables<"channels">;
 type Click = Tables<"clicks">;
+type ChannelSnapshot = Tables<"channel_snapshots">;
+type IssueProgress = Tables<"channel_issue_progress">;
+type ChannelWorkspace = Tables<"channel_workspace">;
 type RecentVideo = {
   id: string;
   title: string;
@@ -58,6 +75,29 @@ type RecentVideo = {
   duration: string;
   category: string;
 };
+type ScheduleSegment = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  title: string;
+  category: string;
+  isRecurring: boolean;
+  isCanceled: boolean;
+};
+
+type ChannelIssue = {
+  id: string;
+  title: string;
+  evidence: string;
+  fix: string;
+  severity: "critical" | "warning";
+};
+
+function durationSeconds(duration: string) {
+  const match = duration.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
+  if (!match) return 0;
+  return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+}
 
 function ProgressRow({ label, value, goal }: { label: string; value: number; goal: number }) {
   const percent = Math.min(100, Math.round((value / goal) * 100));
@@ -79,6 +119,13 @@ function ProgressRow({ label, value, goal }: { label: string; value: number; goa
   );
 }
 
+function localDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function ClickChart({ clicks, days }: { clicks: Click[]; days: number | null }) {
   const points = useMemo(() => {
     const count = days ?? 30;
@@ -88,14 +135,14 @@ function ClickChart({ clicks, days }: { clicks: Click[]; days: number | null }) 
       date.setHours(0, 0, 0, 0);
       date.setDate(date.getDate() - (count - index - 1));
       return {
-        key: date.toISOString().slice(0, 10),
+        key: localDateKey(date),
         label: `${date.getMonth() + 1}/${date.getDate()}`,
         value: 0,
       };
     });
     const map = new Map(rows.map((row) => [row.key, row]));
     clicks.forEach((click) => {
-      const row = map.get(click.created_at.slice(0, 10));
+      const row = map.get(localDateKey(new Date(click.created_at)));
       if (row) row.value += 1;
     });
     return rows;
@@ -126,21 +173,207 @@ function ClickChart({ clicks, days }: { clicks: Click[]; days: number | null }) 
   );
 }
 
+type CountryProperties = { name: string };
+type WorldTopology = Topology<{ countries: GeometryCollection<CountryProperties> }>;
+
+const COUNTRY_NAME_ALIASES: Record<string, string> = {
+  "United States": "United States of America",
+  "Dominican Republic": "Dominican Rep.",
+  "Central African Republic": "Central African Rep.",
+  "Democratic Republic of the Congo": "Dem. Rep. Congo",
+  "Republic of the Congo": "Congo",
+  "South Sudan": "S. Sudan",
+  "Bosnia and Herzegovina": "Bosnia and Herz.",
+  "Equatorial Guinea": "Eq. Guinea",
+};
+
+function GlobalClickMap({ rows }: { rows: [string, number][] }) {
+  const [hovered, setHovered] = useState<{
+    name: string;
+    count: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const max = Math.max(1, ...rows.map(([, count]) => count));
+  const counts = new Map(rows.map(([name, count]) => [COUNTRY_NAME_ALIASES[name] ?? name, count]));
+  const countries = useMemo(() => {
+    const topology = worldAtlas as unknown as WorldTopology;
+    const collection = feature<CountryProperties>(topology, topology.objects.countries);
+    const projection = geoEqualEarth().fitExtent(
+      [
+        [20, 15],
+        [980, 485],
+      ],
+      collection,
+    );
+    const path = geoPath(projection);
+    return collection.features.map((country) => ({
+      name: country.properties?.name ?? "Unknown",
+      path: path(country) ?? "",
+    }));
+  }, []);
+  return (
+    <section className="sb-card p-6">
+      <h2 className="flex items-center gap-2 font-display text-xl font-bold">
+        <Globe className="size-5 text-neon" /> Global Click Distribution
+      </h2>
+      <div
+        className="relative mt-5 aspect-[2/1] overflow-hidden rounded-xl bg-background/60"
+        onMouseLeave={() => setHovered(null)}
+      >
+        <svg viewBox="0 0 1000 500" className="h-full w-full" aria-label="World click map">
+          {countries.map((country) => {
+            const count = counts.get(country.name) ?? 0;
+            const strength = count / max;
+            const fill =
+              count === 0
+                ? "hsl(var(--secondary))"
+                : strength > 0.66
+                  ? "#59ff00"
+                  : strength > 0.33
+                    ? "#38b900"
+                    : "#245f08";
+            return (
+              <path
+                key={country.name}
+                d={country.path}
+                fill={fill}
+                stroke="hsl(var(--background))"
+                strokeWidth="0.8"
+                onMouseEnter={(event) =>
+                  setHovered({
+                    name: country.name,
+                    count,
+                    x: event.nativeEvent.offsetX,
+                    y: event.nativeEvent.offsetY,
+                  })
+                }
+                onMouseMove={(event) =>
+                  setHovered((current) =>
+                    current
+                      ? {
+                          ...current,
+                          x: event.nativeEvent.offsetX,
+                          y: event.nativeEvent.offsetY,
+                        }
+                      : current,
+                  )
+                }
+                className={`${count > 0 ? "animate-pulse" : ""} cursor-crosshair transition-all duration-200 hover:brightness-150`}
+                style={{
+                  filter:
+                    hovered?.name === country.name ? "drop-shadow(0 0 7px #59ff00)" : undefined,
+                  stroke: hovered?.name === country.name ? "#59ff00" : undefined,
+                  strokeWidth: hovered?.name === country.name ? 2 : 0.8,
+                }}
+              >
+                <title>{`${country.name}: ${count} clicks`}</title>
+              </path>
+            );
+          })}
+        </svg>
+        {hovered && (
+          <div
+            className="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 -translate-y-full rounded-lg border border-neon/50 bg-background/95 px-3 py-2 text-xs shadow-[0_0_20px_rgba(89,255,0,0.25)] backdrop-blur"
+            style={{ left: hovered.x, top: hovered.y - 10 }}
+          >
+            <p className="font-bold text-foreground">{hovered.name}</p>
+            <p className={hovered.count ? "text-neon" : "text-muted-foreground"}>
+              {hovered.count} {hovered.count === 1 ? "click" : "clicks"} ·{" "}
+              {hovered.count === 0
+                ? "No data"
+                : hovered.count / max > 0.66
+                  ? "High"
+                  : hovered.count / max > 0.33
+                    ? "Medium"
+                    : "Low"}
+            </p>
+          </div>
+        )}
+        {!rows.length && (
+          <p className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+            Location markers will appear after geographically identified clicks.
+          </p>
+        )}
+      </div>
+      <div className="mt-4 flex flex-wrap justify-center gap-5 text-xs text-muted-foreground">
+        <span>
+          <i className="mr-2 inline-block size-3 rounded bg-secondary" />
+          No data
+        </span>
+        <span>
+          <i className="mr-2 inline-block size-3 rounded bg-neon/40" />
+          Low
+        </span>
+        <span>
+          <i className="mr-2 inline-block size-3 rounded bg-neon/70" />
+          Medium
+        </span>
+        <span>
+          <i className="mr-2 inline-block size-3 rounded bg-neon" />
+          High
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function ChannelAnalysis({
   channel,
+  snapshots,
   onRefresh,
   onDelete,
+  refreshing,
+  progress = [],
+  workspace,
+  onSaveIssue,
+  onSaveWorkspace,
 }: {
   channel: Channel;
-  onRefresh: () => void;
+  snapshots: ChannelSnapshot[];
+  onRefresh: () => Promise<void>;
   onDelete: () => void;
+  refreshing: boolean;
+  progress: IssueProgress[];
+  workspace: ChannelWorkspace | undefined;
+  onSaveIssue: (input: {
+    issueId: string;
+    completed: boolean;
+    evidenceUrl?: string | null;
+    notes?: string | null;
+    targetDate?: string | null;
+  }) => Promise<void>;
+  onSaveWorkspace: (input: {
+    tags: string[];
+    notes: string;
+    followUpAt: string | null;
+    monitoringEnabled: boolean;
+  }) => Promise<void>;
 }) {
+  const queryClient = useQueryClient();
+  const generateTokenFn = useServerFn(generateCampaignToken);
+  const [fiverrOrderReference, setFiverrOrderReference] = useState("");
+  const [generatedToken, setGeneratedToken] = useState("");
+  const [generatingToken, setGeneratingToken] = useState(false);
+  const [workspaceDraft, setWorkspaceDraft] = useState({
+    tags: workspace?.tags.join(", ") ?? "",
+    notes: workspace?.owner_notes ?? "",
+    followUpAt: workspace?.follow_up_at?.slice(0, 16) ?? "",
+    monitoringEnabled: workspace?.monitoring_enabled ?? true,
+  });
+  useEffect(() => {
+    setWorkspaceDraft({
+      tags: workspace?.tags.join(", ") ?? "",
+      notes: workspace?.owner_notes ?? "",
+      followUpAt: workspace?.follow_up_at?.slice(0, 16) ?? "",
+      monitoringEnabled: workspace?.monitoring_enabled ?? true,
+    });
+  }, [workspace]);
   const host = typeof window === "undefined" ? "localhost" : window.location.hostname;
   const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const promoUrl = `${origin}/p/${channel.id}`;
+  const promoUrl = `${origin}/go/${encodeURIComponent(channel.username)}`;
+  const reportUrl = `${origin}/r/${encodeURIComponent(channel.username)}`;
   const followers = channel.followers ?? 0;
-  const issues = Number(!channel.is_live) + Number(followers < 1000);
-  const health = Math.max(0, 100 - issues * 50);
   const twitchPlayer = `https://player.twitch.tv/?channel=${encodeURIComponent(channel.username)}&parent=${encodeURIComponent(host)}`;
   const twitchChat = `https://www.twitch.tv/embed/${encodeURIComponent(channel.username)}/chat?parent=${encodeURIComponent(host)}&darkpopout`;
   const recentVideos = (
@@ -149,7 +382,141 @@ function ChannelAnalysis({
   const recentCategories = (
     Array.isArray(channel.recent_categories) ? channel.recent_categories : []
   ) as string[];
+  const scheduleSegments = (
+    Array.isArray(channel.schedule_segments) ? channel.schedule_segments : []
+  ) as ScheduleSegment[];
+  const scheduleVacation = channel.schedule_vacation as {
+    startTime?: string;
+    endTime?: string;
+  } | null;
   const aiInsights = (Array.isArray(channel.ai_insights) ? channel.ai_insights : []) as string[];
+  const growthAudit = buildGrowthAudit(channel);
+  const orderedSnapshots = [...snapshots].sort(
+    (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime(),
+  );
+  const firstSnapshot = orderedSnapshots[0];
+  const latestSnapshot = orderedSnapshots.at(-1);
+  const followerChange =
+    firstSnapshot && latestSnapshot ? latestSnapshot.followers - firstSnapshot.followers : 0;
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const recent30 = recentVideos.filter(
+    (video) => new Date(video.createdAt).getTime() >= thirtyDaysAgo,
+  );
+  const streamHours30 =
+    recent30.reduce((sum, video) => sum + durationSeconds(video.duration), 0) / 3600;
+  const streamDays30 = new Set(
+    recent30.map((video) => new Date(video.createdAt).toISOString().slice(0, 10)),
+  ).size;
+  const averageVodViews = recentVideos.length
+    ? recentVideos.reduce((sum, video) => sum + video.viewCount, 0) / recentVideos.length
+    : 0;
+  const channelIssues: ChannelIssue[] = [];
+
+  if (!channel.is_live) {
+    channelIssues.push({
+      id: "offline",
+      title: "CHANNEL OFFLINE — LOSING MOMENTUM",
+      evidence:
+        "The channel is currently offline, reducing opportunities for live discovery and engagement.",
+      fix: "Publish a consistent weekly schedule and go live during the hours your audience is most active.",
+      severity: "critical",
+    });
+  }
+  if (followers < 25) {
+    channelIssues.push({
+      id: "affiliate-followers",
+      title: "AFFILIATE FOLLOWER REQUIREMENT NOT MET",
+      evidence: `Current: ${followers.toLocaleString()} · Required: 25 · Gap: ${25 - followers}`,
+      fix: "Add a clear follow call-to-action, promote short highlights, and collaborate with adjacent creators.",
+      severity: "critical",
+    });
+  }
+  if (streamHours30 < 4) {
+    channelIssues.push({
+      id: "affiliate-hours",
+      title: "STREAM HOURS BELOW AFFILIATE REQUIREMENT",
+      evidence: `Estimated ${streamHours30.toFixed(1)} of 4 public archived hours in the last 30 days.`,
+      fix: `Stream at least ${(4 - streamHours30).toFixed(1)} more hours while keeping the broadcasts archived.`,
+      severity: "critical",
+    });
+  }
+  if (streamDays30 < 4) {
+    channelIssues.push({
+      id: "affiliate-days",
+      title: "NOT ENOUGH UNIQUE STREAM DAYS",
+      evidence: `Estimated ${streamDays30} of 4 public archived stream days in the last 30 days.`,
+      fix: `Schedule streams on ${4 - streamDays30} additional unique day${4 - streamDays30 === 1 ? "" : "s"}.`,
+      severity: "critical",
+    });
+  }
+  if (channel.is_live && (channel.viewer_count ?? 0) < 3) {
+    channelIssues.push({
+      id: "live-viewers",
+      title: "CURRENT LIVE VIEWERSHIP IS LOW",
+      evidence: `${channel.viewer_count ?? 0} current viewers; Affiliate uses a 3-viewer average achievement.`,
+      fix: "Announce streams before going live, raid similar channels, and start with a strong first-hour segment.",
+      severity: "critical",
+    });
+  }
+  if (!channel.banner_url) {
+    channelIssues.push({
+      id: "banner",
+      title: "CHANNEL BANNER IS MISSING",
+      evidence: "Twitch returned no offline banner for this channel.",
+      fix: "Upload a clear 1920×1080 offline banner with your schedule, social handle, and channel promise.",
+      severity: "warning",
+    });
+  }
+  if (!channel.avatar_url) {
+    channelIssues.push({
+      id: "avatar",
+      title: "PROFILE LOGO IS MISSING",
+      evidence: "Twitch returned no profile image.",
+      fix: "Add a high-contrast square logo that remains recognizable at small sizes.",
+      severity: "warning",
+    });
+  }
+  if (!channel.description || channel.description.trim().length < 80) {
+    channelIssues.push({
+      id: "about-description",
+      title: "ABOUT DESCRIPTION IS TOO SHORT",
+      evidence: channel.description
+        ? `The public About description is only ${channel.description.trim().length} characters.`
+        : "No public About description was returned.",
+      fix: "Expand the channel bio with the games you stream, your schedule, and a clear reason to follow. Twitch panels are checked separately on the live About page.",
+      severity: "warning",
+    });
+  }
+  if (!recentVideos.length) {
+    channelIssues.push({
+      id: "vods",
+      title: "NO RECENT ARCHIVED BROADCASTS",
+      evidence: "Twitch returned no recent public archives.",
+      fix: "Enable VOD storage and keep recent broadcasts public so new viewers can discover past content.",
+      severity: "warning",
+    });
+  } else if (averageVodViews < 25) {
+    channelIssues.push({
+      id: "vod-reach",
+      title: "RECENT VOD REACH IS LOW",
+      evidence: `${averageVodViews.toFixed(1)} average public views across the latest ${recentVideos.length} archived broadcasts.`,
+      fix: "Use benefit-led titles, stronger thumbnails, clips, and cross-platform posts to drive replay discovery.",
+      severity: "warning",
+    });
+  }
+
+  const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
+  const health = calculateHealthScore(growthAudit, completedIds);
+  const verifiedIssues = growthAudit.filter((issue) => issue.classification === "verified");
+  const processIssues = growthAudit.filter((issue) => issue.classification === "process");
+  const completedCount = completedIds.length;
+  const topVideo = [...recentVideos].sort((a, b) => b.viewCount - a.viewCount)[0];
+  const benchmarkLabel =
+    followers < 50
+      ? "Emerging channel (0–49 followers)"
+      : followers < 1000
+        ? "Growing channel (50–999 followers)"
+        : "Established channel (1,000+ followers)";
 
   return (
     <article className="sb-card overflow-hidden">
@@ -198,10 +565,11 @@ function ChannelAnalysis({
         <div className="flex gap-2">
           <button
             onClick={onRefresh}
+            disabled={refreshing}
             aria-label={`Refresh ${channel.username}`}
-            className="rounded-lg border border-border p-2.5 hover:border-neon hover:text-neon"
+            className="rounded-lg border border-border p-2.5 hover:border-neon hover:text-neon disabled:cursor-wait disabled:opacity-60"
           >
-            <RefreshCw className="size-4" />
+            <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
           </button>
           <button
             onClick={onDelete}
@@ -235,6 +603,47 @@ function ChannelAnalysis({
           </p>
         </div>
       </div>
+
+      <section className="border-t border-border p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg font-bold">Improvement Tracking</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              A new snapshot is saved whenever this channel is analyzed or refreshed.
+            </p>
+          </div>
+          <span className="rounded-full bg-neon/10 px-3 py-1 text-xs font-bold text-neon">
+            {snapshots.length} snapshot{snapshots.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="rounded-lg bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">Follower Change</p>
+            <p
+              className={`mt-1 font-display text-2xl font-bold ${followerChange >= 0 ? "text-neon" : "text-destructive"}`}
+            >
+              {followerChange >= 0 ? "+" : ""}
+              {followerChange}
+            </p>
+          </div>
+          <div className="rounded-lg bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">First Tracked</p>
+            <p className="mt-1 font-semibold">
+              {firstSnapshot
+                ? new Date(firstSnapshot.recorded_at).toLocaleDateString()
+                : "Waiting for first refresh"}
+            </p>
+          </div>
+          <div className="rounded-lg bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">Latest Snapshot</p>
+            <p className="mt-1 font-semibold">
+              {latestSnapshot
+                ? new Date(latestSnapshot.recorded_at).toLocaleString()
+                : "Not recorded yet"}
+            </p>
+          </div>
+        </div>
+      </section>
 
       {(channel.current_category || channel.current_title) && (
         <section className="border-t border-border p-6">
@@ -317,6 +726,84 @@ function ChannelAnalysis({
             )}
           </div>
 
+          <div className="mt-8 grid gap-5 lg:grid-cols-2">
+            <div className="rounded-xl border border-border bg-secondary/30 p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Upcoming Twitch Schedule</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Official upcoming segments returned by Twitch.
+                  </p>
+                </div>
+                <a
+                  href={`https://www.twitch.tv/${channel.username}/schedule`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-cyan hover:underline"
+                >
+                  Open <ExternalLink className="ml-1 inline size-3.5" />
+                </a>
+              </div>
+              {scheduleVacation?.startTime && scheduleVacation.endTime ? (
+                <p className="mt-4 rounded-lg bg-orange/10 p-3 text-sm text-orange">
+                  Vacation: {new Date(scheduleVacation.startTime).toLocaleDateString()} –{" "}
+                  {new Date(scheduleVacation.endTime).toLocaleDateString()}
+                </p>
+              ) : null}
+              <div className="mt-4 space-y-3">
+                {scheduleSegments.length ? (
+                  scheduleSegments.map((segment) => (
+                    <div
+                      key={segment.id}
+                      className="rounded-lg border border-border bg-background/60 p-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold">{segment.title || "Scheduled stream"}</p>
+                        {segment.isRecurring ? (
+                          <span className="rounded-full bg-cyan/10 px-2 py-1 text-xs text-cyan">
+                            Recurring
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {new Date(segment.startTime).toLocaleString()} ·{" "}
+                        {segment.category || "No category"}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                    No upcoming scheduled streams are currently published on Twitch.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-secondary/30 p-5">
+              <h3 className="font-display text-lg font-bold">Twitch Panels</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Twitch does not provide channel panel images or panel text through its official API.
+                Open the live About page below to see the real, current panels.
+              </p>
+              {channel.description ? (
+                <div className="mt-4 rounded-lg border border-border bg-background/60 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-cyan">
+                    Public channel bio
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">{channel.description}</p>
+                </div>
+              ) : null}
+              <a
+                href={`https://www.twitch.tv/${channel.username}/about`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan px-4 py-3 text-sm font-bold text-background"
+              >
+                View Live Twitch Panels <ExternalLink className="size-4" />
+              </a>
+            </div>
+          </div>
+
           <h3 className="mt-8 font-display text-lg font-bold">Recent Broadcasts</h3>
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {recentVideos.length ? (
@@ -380,18 +867,215 @@ function ChannelAnalysis({
         </section>
       ) : null}
 
+      <section className="border-t border-border p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg font-bold">Growth Control Center</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Track the channel from verified backend evidence through every improvement step.
+            </p>
+          </div>
+          <span className="rounded-full bg-neon/10 px-3 py-1 text-xs font-bold text-neon">
+            {completedCount}/{growthAudit.length} completed
+          </span>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">Verified backend issues</p>
+            <p className="mt-1 font-display text-2xl font-bold text-destructive">
+              {verifiedIssues.length}
+            </p>
+          </div>
+          <div className="rounded-xl bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">Process steps</p>
+            <p className="mt-1 font-display text-2xl font-bold text-orange">
+              {processIssues.length}
+            </p>
+          </div>
+          <div className="rounded-xl bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">Relevant benchmark</p>
+            <p className="mt-1 text-sm font-bold text-cyan">{benchmarkLabel}</p>
+          </div>
+          <div className="rounded-xl bg-secondary/60 p-4">
+            <p className="text-xs text-muted-foreground">Best recent broadcast</p>
+            <p className="mt-1 text-sm font-bold">
+              {topVideo ? `${topVideo.viewCount.toLocaleString()} views` : "No public VOD data"}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div className="rounded-xl border border-border p-5">
+            <h4 className="font-display font-bold">Branding Scorecard</h4>
+            <div className="mt-4 space-y-3 text-sm">
+              {[
+                ["Profile image", Boolean(channel.avatar_url)],
+                ["Offline banner", Boolean(channel.banner_url)],
+                [
+                  "Complete About description",
+                  Boolean(channel.description && channel.description.length >= 80),
+                ],
+                ["Published stream schedule", scheduleSegments.length > 0],
+              ].map(([label, ready]) => (
+                <div
+                  key={String(label)}
+                  className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
+                >
+                  <span>{String(label)}</span>
+                  <span className={ready ? "font-bold text-neon" : "font-bold text-destructive"}>
+                    {ready ? "Detected" : "Missing"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <form
+            className="rounded-xl border border-border p-5"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              await onSaveWorkspace({
+                tags: workspaceDraft.tags
+                  .split(",")
+                  .map((tag) => tag.trim())
+                  .filter(Boolean),
+                notes: workspaceDraft.notes,
+                followUpAt: workspaceDraft.followUpAt
+                  ? new Date(workspaceDraft.followUpAt).toISOString()
+                  : null,
+                monitoringEnabled: workspaceDraft.monitoringEnabled,
+              });
+            }}
+          >
+            <h4 className="font-display font-bold">Owner Workspace</h4>
+            <div className="mt-4 grid gap-3">
+              <input
+                value={workspaceDraft.tags}
+                onChange={(event) =>
+                  setWorkspaceDraft((draft) => ({ ...draft, tags: event.target.value }))
+                }
+                placeholder="Tags: affiliate, priority, follow-up"
+                className="rounded-lg border border-border bg-input px-3 py-2 text-sm"
+              />
+              <textarea
+                value={workspaceDraft.notes}
+                onChange={(event) =>
+                  setWorkspaceDraft((draft) => ({ ...draft, notes: event.target.value }))
+                }
+                placeholder="Private owner notes"
+                className="min-h-20 rounded-lg border border-border bg-input px-3 py-2 text-sm"
+              />
+              <label className="text-xs text-muted-foreground">
+                Follow-up date
+                <input
+                  type="datetime-local"
+                  value={workspaceDraft.followUpAt}
+                  onChange={(event) =>
+                    setWorkspaceDraft((draft) => ({ ...draft, followUpAt: event.target.value }))
+                  }
+                  className="mt-1 block w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={workspaceDraft.monitoringEnabled}
+                  onChange={(event) =>
+                    setWorkspaceDraft((draft) => ({
+                      ...draft,
+                      monitoringEnabled: event.target.checked,
+                    }))
+                  }
+                />
+                Monitor changes whenever Twitch data refreshes
+              </label>
+              <button className="rounded-lg bg-neon px-4 py-2 text-sm font-bold text-primary-foreground">
+                Save Workspace
+              </button>
+            </div>
+          </form>
+        </div>
+        <div className="mt-5 rounded-xl border border-cyan/30 bg-cyan/5 p-5">
+          <h4 className="font-display font-bold text-cyan">Automated Change Monitor</h4>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Every refresh saves a timestamped snapshot and checks followers, live status, viewers,
+            broadcasts, issue count, health score, branding, and schedule changes.
+          </p>
+        </div>
+        <div className="mt-5 rounded-xl border border-orange/40 bg-orange/5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="font-display font-bold text-orange">Owner Campaign Token Issuer</h4>
+              <p className="mt-1 text-sm text-muted-foreground">
+                After confirming the streamer paid through Fiverr, enter the Fiverr order reference
+                and generate one secure, unguessable token locked to {channel.username}.
+              </p>
+            </div>
+            <span className="rounded-full bg-orange/10 px-3 py-1 text-xs font-bold text-orange">
+              Owner only
+            </span>
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={fiverrOrderReference}
+              onChange={(event) => setFiverrOrderReference(event.target.value)}
+              placeholder="Fiverr order reference"
+              className="min-w-0 flex-1 rounded-lg border border-border bg-input px-4 py-2.5 text-sm"
+            />
+            <button
+              disabled={generatingToken || fiverrOrderReference.trim().length < 2}
+              onClick={async () => {
+                setGeneratingToken(true);
+                try {
+                  const result = await generateTokenFn({
+                    data: {
+                      channelId: channel.id,
+                      fiverrOrderReference: fiverrOrderReference.trim(),
+                    },
+                  });
+                  setGeneratedToken(result.token);
+                  await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
+                  toast.success("Secure campaign token generated");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Token generation failed");
+                } finally {
+                  setGeneratingToken(false);
+                }
+              }}
+              className="rounded-lg bg-orange px-5 py-2.5 text-sm font-bold text-background disabled:opacity-50"
+            >
+              {generatingToken ? "Generating…" : "Generate Secure Token"}
+            </button>
+          </div>
+          {generatedToken ? (
+            <div className="mt-4 rounded-lg border border-neon/40 bg-background p-4">
+              <p className="text-xs font-bold uppercase text-neon">Copy now — shown in full once</p>
+              <code className="mt-2 block break-all text-sm text-cyan">{generatedToken}</code>
+              <button
+                onClick={() =>
+                  navigator.clipboard
+                    .writeText(generatedToken)
+                    .then(() => toast.success("Token copied"))
+                }
+                className="mt-3 rounded-lg bg-neon px-4 py-2 text-xs font-bold text-primary-foreground"
+              >
+                Copy Streamer Token
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       <section className="border-t border-destructive/40 bg-destructive/5 p-6">
         <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle className="size-5 text-destructive" />
           <h3 className="font-display font-bold text-destructive">CHANNEL ISSUES DETECTED</h3>
           <span className="rounded bg-destructive px-2 py-0.5 text-xs font-bold text-destructive-foreground">
-            {issues} CRITICAL
+            {growthAudit.length} ISSUES
           </span>
           <button
             onClick={() =>
               navigator.clipboard
-                .writeText(`${origin}/channel-preview/${channel.id}`)
-                .then(() => toast.success("Report link copied"))
+                .writeText(reportUrl)
+                .then(() => toast.success("Public streamer report link copied"))
             }
             className="ml-auto flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm"
           >
@@ -411,29 +1095,125 @@ function ChannelAnalysis({
             <p className="mt-2 font-display text-4xl font-bold">{followers.toLocaleString()}</p>
           </div>
           <div className="rounded-lg bg-background/50 p-4 text-center">
-            <p className="text-xs text-muted-foreground">Avg Successful Streamer</p>
-            <p className="mt-2 font-display text-4xl font-bold">8,000</p>
+            <p className="text-xs text-muted-foreground">Relevant Channel Benchmark</p>
+            <p className="mt-2 text-sm font-bold text-cyan">{benchmarkLabel}</p>
           </div>
         </div>
-        {!channel.is_live && (
-          <div className="mt-5 rounded-lg border border-destructive/40 bg-destructive/10 p-4">
-            <h4 className="font-display font-bold text-destructive">
-              CHANNEL OFFLINE — LOSING MOMENTUM
-            </h4>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Go live consistently to grow viewers, followers and revenue opportunities.
-            </p>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          {growthAudit.map((issue) => {
+            const saved = progress.find((item) => item.issue_id === issue.id);
+            const plan = getAuditActionPlan(issue);
+            return (
+              <article
+                key={issue.id}
+                className={`rounded-xl border p-5 ${saved?.completed ? "border-neon/60 bg-neon/5" : "border-destructive/70 bg-destructive/10"}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                      {issue.phase}
+                    </p>
+                    <h4 className="mt-1 flex items-center gap-2 font-display text-lg font-bold text-destructive">
+                      <AlertTriangle className="size-5 shrink-0" /> {issue.title}
+                    </h4>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="shrink-0 rounded-full border border-foreground px-2 py-1 text-[10px] font-bold uppercase text-foreground">
+                      {issue.status === "critical" ? "Critical" : "Warning"}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-1 text-[10px] font-extrabold uppercase ${issue.classification === "verified" ? "bg-cyan/15 text-cyan" : "bg-orange/15 text-orange"}`}
+                    >
+                      {issue.classification === "verified"
+                        ? "Verified issue · Twitch backend assessment"
+                        : "Process to follow"}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3 border-t border-destructive/30 pt-4 text-sm">
+                  <p>
+                    <strong>What it is:</strong> {issue.whatItIs}
+                  </p>
+                  <p>
+                    <strong>Why you need to fix it:</strong> {issue.whyFixIt}
+                  </p>
+                  <div className="grid gap-2 rounded-lg bg-background/50 p-3 text-xs sm:grid-cols-3">
+                    <span>
+                      <strong>Priority:</strong> {plan.priority}
+                    </span>
+                    <span>
+                      <strong>Impact:</strong> {plan.impact}
+                    </span>
+                    <span>
+                      <strong>Target:</strong> {plan.deadlineDays} days
+                    </span>
+                  </div>
+                  <details className="rounded-lg border border-border bg-background/40 p-3">
+                    <summary className="cursor-pointer font-bold">Action plan</summary>
+                    <ol className="mt-3 list-decimal space-y-1 pl-5">
+                      {plan.actions.map((action) => (
+                        <li key={action}>{action}</li>
+                      ))}
+                    </ol>
+                  </details>
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      id={`evidence-${channel.id}-${issue.id}`}
+                      defaultValue={saved?.evidence_url ?? ""}
+                      placeholder="Evidence link (screenshot, Twitch page, document)"
+                      className="rounded-lg border border-border bg-input px-3 py-2 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const evidence =
+                          (
+                            document.getElementById(
+                              `evidence-${channel.id}-${issue.id}`,
+                            ) as HTMLInputElement | null
+                          )?.value ?? "";
+                        await onSaveIssue({
+                          issueId: issue.id,
+                          completed: !saved?.completed,
+                          evidenceUrl: evidence || null,
+                          targetDate: new Date(Date.now() + plan.deadlineDays * 86400000)
+                            .toISOString()
+                            .slice(0, 10),
+                        });
+                      }}
+                      className={`rounded-lg px-4 py-2 text-xs font-bold ${saved?.completed ? "bg-secondary text-foreground" : "bg-neon text-primary-foreground"}`}
+                    >
+                      {saved?.completed ? "Reopen issue" : "Mark complete"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <div className="mt-6 rounded-xl bg-gradient-to-r from-destructive to-orange p-5 text-destructive-foreground">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <Target className="size-10 shrink-0" />
+            <div className="flex-1">
+              <h4 className="font-display text-xl font-extrabold">FIX ALL ISSUES NOW</h4>
+              <p className="mt-1 text-sm font-semibold">
+                Review every issue above, then refresh the channel analysis to measure progress.
+              </p>
+              <p className="mt-2 text-xs opacity-80">
+                Affiliate requirements use Twitch's current public criteria. Private analytics
+                remain authoritative for average viewers.
+              </p>
+            </div>
+            <button
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="flex items-center justify-center gap-2 rounded-lg bg-background px-5 py-3 text-sm font-bold text-foreground disabled:cursor-wait disabled:opacity-70"
+            >
+              <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing Twitch Data…" : "Refresh Analysis"}
+            </button>
           </div>
-        )}
-        {followers < 1000 && (
-          <div className="mt-3 rounded-lg border border-orange/40 bg-orange/10 p-4">
-            <h4 className="font-display font-bold text-orange">FOLLOWER COUNT NEEDS ATTENTION</h4>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Current: {followers.toLocaleString()} · Target: 1,000 · Gap:{" "}
-              {Math.max(0, 1000 - followers).toLocaleString()}
-            </p>
-          </div>
-        )}
+        </div>
       </section>
 
       <section className="border-t border-border p-6">
@@ -441,27 +1221,31 @@ function ChannelAnalysis({
         <div className="mt-5 grid gap-8 lg:grid-cols-2">
           <div className="space-y-4">
             <h4 className="font-semibold text-cyan">Twitch Affiliate</h4>
-            <ProgressRow label="Followers" value={followers} goal={50} />
+            <ProgressRow label="Followers" value={followers} goal={25} />
             <ProgressRow
-              label="Hours Streamed (30 days)"
-              value={channel.is_live ? 1 : 0}
-              goal={8}
+              label="Archived Hours (30 days)"
+              value={Math.round(streamHours30)}
+              goal={4}
             />
+            <ProgressRow label="Unique Stream Days (30 days)" value={streamDays30} goal={4} />
             <ProgressRow
-              label="Average Viewers (7 days)"
+              label="Current Viewers (official average is private)"
               value={channel.viewer_count ?? 0}
               goal={3}
             />
           </div>
           <div className="space-y-4">
             <h4 className="font-semibold text-orange">Twitch Partner</h4>
-            <ProgressRow label="Average Viewers" value={channel.viewer_count ?? 0} goal={75} />
+            <ProgressRow label="Recent Streams (30 days)" value={recent30.length} goal={6} />
             <ProgressRow
-              label="Hours Streamed (30 days)"
-              value={channel.is_live ? 1 : 0}
+              label="Current Viewers (75 average required)"
+              value={channel.viewer_count ?? 0}
               goal={75}
             />
-            <ProgressRow label="Stream Days (30 days)" value={channel.is_live ? 1 : 0} goal={12} />
+            <p className="text-xs text-muted-foreground">
+              Twitch requires qualifying performance across consecutive 30-day periods. Confirm
+              official average viewers in Creator Dashboard → Achievements.
+            </p>
           </div>
         </div>
       </section>
@@ -510,6 +1294,39 @@ function ChannelAnalysis({
           ))}
         </ul>
       </section>
+
+      <section className="border-t border-cyan/40 bg-cyan/5 p-6">
+        <h3 className="flex items-center gap-2 font-display text-lg font-bold">
+          <Share2 className="size-5 text-cyan" /> Public Streamer Report Link
+        </h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Send this link directly to the streamer. It opens the complete public report without
+          requiring signup or login.
+        </p>
+        <code className="mt-4 block overflow-x-auto rounded-lg bg-background p-4 text-sm text-cyan">
+          {reportUrl}
+        </code>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={() =>
+              navigator.clipboard
+                .writeText(reportUrl)
+                .then(() => toast.success("Public streamer report link copied"))
+            }
+            className="flex items-center gap-2 rounded-lg bg-cyan px-4 py-2.5 text-sm font-bold text-background"
+          >
+            <Copy className="size-4" /> Copy Report Link
+          </button>
+          <a
+            href={reportUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-lg border border-cyan px-4 py-2.5 text-sm font-bold text-cyan"
+          >
+            <ExternalLink className="size-4" /> Preview Public Report
+          </a>
+        </div>
+      </section>
     </article>
   );
 }
@@ -520,8 +1337,15 @@ function DashboardPage() {
   const [ready, setReady] = useState(false);
   const [days, setDays] = useState<number | null>(7);
   const [bulkUrls, setBulkUrls] = useState("");
+  const [channelSearch, setChannelSearch] = useState("");
+  const [channelFilter, setChannelFilter] = useState<"all" | "live" | "follow-up">("all");
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const dashboard = useServerFn(getDashboard);
   const channelsFn = useServerFn(listChannels);
+  const snapshotsFn = useServerFn(listChannelSnapshots);
+  const growthWorkspaceFn = useServerFn(listGrowthWorkspace);
+  const saveIssueFn = useServerFn(saveIssueProgress);
+  const saveWorkspaceFn = useServerFn(saveChannelWorkspace);
   const bulkFn = useServerFn(createBulkCampaigns);
   const refreshFn = useServerFn(refreshChannel);
   const deleteFn = useServerFn(deleteChannel);
@@ -543,6 +1367,16 @@ function DashboardPage() {
     queryFn: () => channelsFn({}),
     enabled: ready,
   });
+  const { data: snapshots } = useQuery({
+    queryKey: ["channel-snapshots"],
+    queryFn: () => snapshotsFn({}),
+    enabled: ready,
+  });
+  const { data: growthWorkspace } = useQuery({
+    queryKey: ["growth-workspace"],
+    queryFn: () => growthWorkspaceFn({}),
+    enabled: ready,
+  });
   const bulkMutation = useMutation({
     mutationFn: (urls: string[]) => bulkFn({ data: { urls } }),
     onSuccess: async (result) => {
@@ -553,6 +1387,7 @@ function DashboardPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["channels"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+        queryClient.invalidateQueries({ queryKey: ["channel-snapshots"] }),
       ]);
     },
     onError: (error) =>
@@ -570,9 +1405,10 @@ function DashboardPage() {
       return acc;
     }, {}),
   ).sort((a, b) => b[1] - a[1]);
+  const locatedClicks = clicks.filter((click) => Boolean(click.country));
   const countryRows = Object.entries(
-    clicks.reduce<Record<string, number>>((acc, click) => {
-      const key = click.country ?? "Unknown";
+    locatedClicks.reduce<Record<string, number>>((acc, click) => {
+      const key = click.country!;
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {}),
@@ -616,12 +1452,19 @@ function DashboardPage() {
   ];
 
   async function refresh(id: string) {
+    if (refreshingId) return;
+    setRefreshingId(id);
     try {
       await refreshFn({ data: { id } });
-      await queryClient.invalidateQueries({ queryKey: ["channels"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["channels"] }),
+        queryClient.invalidateQueries({ queryKey: ["channel-snapshots"] }),
+      ]);
       toast.success("Channel refreshed");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Refresh failed");
+    } finally {
+      setRefreshingId(null);
     }
   }
   async function remove(id: string) {
@@ -639,33 +1482,10 @@ function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
-          <Link to="/">
-            <Logo suffix="Dashboard" />
-          </Link>
-          <div className="flex gap-2">
-            <Link
-              to="/"
-              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:border-neon"
-            >
-              Home
-            </Link>
-            <button
-              onClick={async () => {
-                await supabase.auth.signOut();
-                navigate({ to: "/auth" });
-              }}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:border-neon"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className="mx-auto max-w-7xl space-y-8 px-5 py-10">
-        <div>
+        <div id="overview" className="scroll-mt-28">
           <h1 className="font-display text-3xl font-extrabold">StreamBoost Dashboard</h1>
           <p className="mt-2 text-muted-foreground">
             Channel intelligence, monetization progress and promotion analytics in one place.
@@ -683,7 +1503,7 @@ function DashboardPage() {
           ))}
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-3">
+        <div id="analytics" className="grid scroll-mt-28 gap-6 xl:grid-cols-3">
           <section className="sb-card p-6 xl:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-display text-xl font-bold">Clicks Over Time</h2>
@@ -708,6 +1528,11 @@ function DashboardPage() {
           </section>
           <section className="sb-card p-6">
             <h2 className="font-display text-xl font-bold">Geographic Breakdown</h2>
+            {clicks.length > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {locatedClicks.length} of {clicks.length} clicks include location data.
+              </p>
+            )}
             <div className="mt-5 space-y-3">
               {countryRows.length ? (
                 countryRows.map(([country, count]) => (
@@ -717,7 +1542,7 @@ function DashboardPage() {
                   >
                     <span>{country}</span>
                     <span className="font-bold text-neon">
-                      {count} ({((count / clicks.length) * 100).toFixed(1)}%)
+                      {count} ({((count / locatedClicks.length) * 100).toFixed(1)}%)
                     </span>
                   </div>
                 ))
@@ -728,7 +1553,9 @@ function DashboardPage() {
           </section>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <GlobalClickMap rows={countryRows} />
+
+        <div id="traffic" className="grid scroll-mt-28 gap-6 lg:grid-cols-2">
           <section className="sb-card p-6">
             <h2 className="font-display text-xl font-bold">Top Traffic Sources</h2>
             <div className="mt-5 space-y-3">
@@ -802,7 +1629,7 @@ function DashboardPage() {
           ))}
         </div>
 
-        <section className="sb-card p-6">
+        <section id="campaigns" className="sb-card scroll-mt-28 p-6">
           <h2 className="font-display text-xl font-bold">Bulk Campaign Tools</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Create campaigns for multiple Twitch, Kick or YouTube channels. One URL per line, up to
@@ -837,8 +1664,8 @@ function DashboardPage() {
           </button>
         </section>
 
-        <section>
-          <div className="mb-5 flex items-end justify-between">
+        <section id="channels" className="scroll-mt-28">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
             <div>
               <h2 className="font-display text-2xl font-bold">Your Verified Channels</h2>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -847,15 +1674,69 @@ function DashboardPage() {
             </div>
             <Users className="size-7 text-cyan" />
           </div>
+          <div className="mb-5 grid gap-3 rounded-xl border border-border bg-secondary/30 p-4 sm:grid-cols-[1fr_auto]">
+            <input
+              value={channelSearch}
+              onChange={(event) => setChannelSearch(event.target.value)}
+              placeholder="Search saved channels, platforms, or tags"
+              className="rounded-lg border border-border bg-input px-4 py-2.5 text-sm"
+            />
+            <select
+              value={channelFilter}
+              onChange={(event) => setChannelFilter(event.target.value as typeof channelFilter)}
+              className="rounded-lg border border-border bg-input px-4 py-2.5 text-sm"
+            >
+              <option value="all">All saved channels</option>
+              <option value="live">Live now</option>
+              <option value="follow-up">Follow-up scheduled</option>
+            </select>
+          </div>
           <div className="space-y-8">
-            {(channels ?? []).map((channel) => (
-              <ChannelAnalysis
-                key={channel.id}
-                channel={channel}
-                onRefresh={() => refresh(channel.id)}
-                onDelete={() => remove(channel.id)}
-              />
-            ))}
+            {(channels ?? [])
+              .filter((channel) => {
+                const workspace = (growthWorkspace?.workspace ?? []).find(
+                  (item) => item.channel_id === channel.id,
+                );
+                const query = channelSearch.trim().toLowerCase();
+                const matchesSearch =
+                  !query ||
+                  [channel.username, channel.platform, ...(workspace?.tags ?? [])].some((value) =>
+                    value.toLowerCase().includes(query),
+                  );
+                const matchesFilter =
+                  channelFilter === "all" ||
+                  (channelFilter === "live" && channel.is_live) ||
+                  (channelFilter === "follow-up" && Boolean(workspace?.follow_up_at));
+                return matchesSearch && matchesFilter;
+              })
+              .map((channel) => (
+                <ChannelAnalysis
+                  key={channel.id}
+                  channel={channel}
+                  snapshots={(snapshots ?? []).filter(
+                    (snapshot) => snapshot.channel_id === channel.id,
+                  )}
+                  onRefresh={() => refresh(channel.id)}
+                  onDelete={() => remove(channel.id)}
+                  refreshing={refreshingId === channel.id}
+                  progress={(growthWorkspace?.progress ?? []).filter(
+                    (item) => item.channel_id === channel.id,
+                  )}
+                  workspace={(growthWorkspace?.workspace ?? []).find(
+                    (item) => item.channel_id === channel.id,
+                  )}
+                  onSaveIssue={async (input) => {
+                    await saveIssueFn({ data: { channelId: channel.id, ...input } });
+                    await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
+                    toast.success(input.completed ? "Issue marked complete" : "Issue reopened");
+                  }}
+                  onSaveWorkspace={async (input) => {
+                    await saveWorkspaceFn({ data: { channelId: channel.id, ...input } });
+                    await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
+                    toast.success("Channel workspace saved");
+                  }}
+                />
+              ))}
             {channels && channels.length === 0 && (
               <div className="sb-card p-10 text-center">
                 <p className="text-muted-foreground">No channels yet.</p>

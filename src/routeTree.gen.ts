@@ -10,14 +10,25 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as CampaignsRouteImport } from './routes/campaigns'
+import { Route as ChannelsRouteImport } from './routes/channels'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ProgressRouteImport } from './routes/progress'
 import { Route as ChannelPreviewIdRouteImport } from './routes/channel-preview.$id'
+import { Route as GoUsernameRouteImport } from './routes/go.$username'
 import { Route as PIdRouteImport } from './routes/p.$id'
+import { Route as RUsernameRouteImport } from './routes/r.$username'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -25,9 +36,24 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CampaignsRoute = CampaignsRouteImport.update({
+  id: '/campaigns',
+  path: '/campaigns',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChannelsRoute = ChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProgressRoute = ProgressRouteImport.update({
+  id: '/progress',
+  path: '/progress',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChannelPreviewIdRoute = ChannelPreviewIdRouteImport.update({
@@ -35,54 +61,116 @@ const ChannelPreviewIdRoute = ChannelPreviewIdRouteImport.update({
   path: '/channel-preview/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoUsernameRoute = GoUsernameRouteImport.update({
+  id: '/go/$username',
+  path: '/go/$username',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PIdRoute = PIdRouteImport.update({
   id: '/p/$id',
   path: '/p/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RUsernameRoute = RUsernameRouteImport.update({
+  id: '/r/$username',
+  path: '/r/$username',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/campaigns': typeof CampaignsRoute
+  '/channels': typeof ChannelsRoute
   '/dashboard': typeof DashboardRoute
+  '/progress': typeof ProgressRoute
   '/channel-preview/$id': typeof ChannelPreviewIdRoute
+  '/go/$username': typeof GoUsernameRoute
   '/p/$id': typeof PIdRoute
+  '/r/$username': typeof RUsernameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/campaigns': typeof CampaignsRoute
+  '/channels': typeof ChannelsRoute
   '/dashboard': typeof DashboardRoute
+  '/progress': typeof ProgressRoute
   '/channel-preview/$id': typeof ChannelPreviewIdRoute
+  '/go/$username': typeof GoUsernameRoute
   '/p/$id': typeof PIdRoute
+  '/r/$username': typeof RUsernameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/campaigns': typeof CampaignsRoute
+  '/channels': typeof ChannelsRoute
   '/dashboard': typeof DashboardRoute
+  '/progress': typeof ProgressRoute
   '/channel-preview/$id': typeof ChannelPreviewIdRoute
+  '/go/$username': typeof GoUsernameRoute
   '/p/$id': typeof PIdRoute
+  '/r/$username': typeof RUsernameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/dashboard' | '/channel-preview/$id' | '/p/$id'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/campaigns'
+    | '/channels'
+    | '/dashboard'
+    | '/progress'
+    | '/channel-preview/$id'
+    | '/go/$username'
+    | '/p/$id'
+    | '/r/$username'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/dashboard' | '/channel-preview/$id' | '/p/$id'
+  to:
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/campaigns'
+    | '/channels'
+    | '/dashboard'
+    | '/progress'
+    | '/channel-preview/$id'
+    | '/go/$username'
+    | '/p/$id'
+    | '/r/$username'
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/auth'
+    | '/campaigns'
+    | '/channels'
     | '/dashboard'
+    | '/progress'
     | '/channel-preview/$id'
+    | '/go/$username'
     | '/p/$id'
+    | '/r/$username'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
+  CampaignsRoute: typeof CampaignsRoute
+  ChannelsRoute: typeof ChannelsRoute
   DashboardRoute: typeof DashboardRoute
+  ProgressRoute: typeof ProgressRoute
   ChannelPreviewIdRoute: typeof ChannelPreviewIdRoute
+  GoUsernameRoute: typeof GoUsernameRoute
   PIdRoute: typeof PIdRoute
+  RUsernameRoute: typeof RUsernameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -94,11 +182,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/campaigns': {
+      id: '/campaigns'
+      path: '/campaigns'
+      fullPath: '/campaigns'
+      preLoaderRoute: typeof CampaignsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/channels': {
+      id: '/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof ChannelsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -108,11 +217,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/progress': {
+      id: '/progress'
+      path: '/progress'
+      fullPath: '/progress'
+      preLoaderRoute: typeof ProgressRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/channel-preview/$id': {
       id: '/channel-preview/$id'
       path: '/channel-preview/$id'
       fullPath: '/channel-preview/$id'
       preLoaderRoute: typeof ChannelPreviewIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/go/$username': {
+      id: '/go/$username'
+      path: '/go/$username'
+      fullPath: '/go/$username'
+      preLoaderRoute: typeof GoUsernameRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/p/$id': {
@@ -122,15 +245,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/r/$username': {
+      id: '/r/$username'
+      path: '/r/$username'
+      fullPath: '/r/$username'
+      preLoaderRoute: typeof RUsernameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
+  CampaignsRoute: CampaignsRoute,
+  ChannelsRoute: ChannelsRoute,
   DashboardRoute: DashboardRoute,
+  ProgressRoute: ProgressRoute,
   ChannelPreviewIdRoute: ChannelPreviewIdRoute,
+  GoUsernameRoute: GoUsernameRoute,
   PIdRoute: PIdRoute,
+  RUsernameRoute: RUsernameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
