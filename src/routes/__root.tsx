@@ -78,14 +78,28 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "StreamBoost — Amplify Your Gaming Streams" },
+      {
+        name: "description",
+        content:
+          "Analyze Twitch channel health, track growth and manage promotion campaigns with StreamBoost.",
+      },
+      { name: "author", content: "StreamBoost" },
+      { property: "og:site_name", content: "StreamBoost" },
+      { property: "og:title", content: "StreamBoost — Amplify Your Gaming Streams" },
+      {
+        property: "og:description",
+        content:
+          "Analyze Twitch channel health, track growth and manage promotion campaigns with StreamBoost.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "StreamBoost — Amplify Your Gaming Streams" },
+      {
+        name: "twitter:description",
+        content:
+          "Analyze Twitch channel health, track growth and manage promotion campaigns with StreamBoost.",
+      },
     ],
     links: [
       {
