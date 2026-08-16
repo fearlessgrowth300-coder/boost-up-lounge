@@ -27,6 +27,8 @@ function snapshotIssueMetrics(stats: Stats) {
   const issues = buildGrowthAudit({
     followers: stats.followers,
     is_live: stats.isLive,
+    avatar_url: stats.avatarUrl,
+    banner_url: stats.bannerUrl,
     description: stats.description,
     recent_videos: stats.recentVideos,
   });

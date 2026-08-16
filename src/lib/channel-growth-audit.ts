@@ -14,6 +14,8 @@ export type GrowthAuditItem = {
 export type GrowthAuditChannel = {
   followers?: number | null;
   is_live?: boolean | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
   description?: string | null;
   recent_videos?: unknown;
 };
@@ -79,7 +81,16 @@ export function calculateHealthScore(issues: GrowthAuditItem[], completedIds: st
     // reduce a channel's evidence-based score.
     if (getAuditClassification(issue) !== "verified") return total;
     if (completed.has(issue.id)) return total;
-    return total + (issue.status === "critical" ? 5 : 3);
+    const measuredPenalty: Record<string, number> = {
+      "channel-offline": 18,
+      "affiliate-followers": 25,
+      "channel-logo": 10,
+      "channel-banner": 10,
+      "about-description": 12,
+      "recent-vod-reach": 10,
+      "no-recent-vods": 12,
+    };
+    return total + (measuredPenalty[issue.id] ?? (issue.status === "critical" ? 12 : 7));
   }, 0);
   return Math.max(0, 100 - penalty);
 }
@@ -323,6 +334,28 @@ export function buildGrowthAudit(channel: GrowthAuditChannel): GrowthAuditItem[]
         "The channel must reach Twitch's follower requirement before it can complete the follower portion of the Affiliate path.",
     });
   }
+  if (!channel.avatar_url) {
+    detected.push({
+      id: "channel-logo",
+      phase: "Twitch Channel Health",
+      title: "CHANNEL LOGO IS MISSING",
+      status: "warning",
+      whatItIs: "No public Twitch profile image was returned for this channel.",
+      whyFixIt:
+        "A recognizable channel logo helps viewers identify the streamer quickly and makes the channel feel complete and trustworthy.",
+    });
+  }
+  if (!channel.banner_url) {
+    detected.push({
+      id: "channel-banner",
+      phase: "Twitch Channel Health",
+      title: "CHANNEL BANNER IS MISSING",
+      status: "warning",
+      whatItIs: "No public Twitch banner image was returned for this channel.",
+      whyFixIt:
+        "A custom banner strengthens the first impression of the channel and gives new visitors a clear visual identity before they watch.",
+    });
+  }
   if (!channel.description || channel.description.trim().length < 80) {
     detected.push({
       id: "about-description",
@@ -336,7 +369,17 @@ export function buildGrowthAudit(channel: GrowthAuditChannel): GrowthAuditItem[]
         "A complete About description helps first-time visitors quickly understand the streamer, the content, and why they should follow.",
     });
   }
-  if (videos.length && averageViews < 25) {
+  if (!videos.length) {
+    detected.push({
+      id: "no-recent-vods",
+      phase: "Twitch Channel Health",
+      title: "NO RECENT ARCHIVED BROADCASTS",
+      status: "warning",
+      whatItIs: "Twitch returned no recent public archived broadcasts for this channel.",
+      whyFixIt:
+        "Public VODs help viewers discover the channel between live streams and provide evidence of consistent content.",
+    });
+  } else if (averageViews < 25) {
     detected.push({
       id: "recent-vod-reach",
       phase: "Twitch Channel Health",

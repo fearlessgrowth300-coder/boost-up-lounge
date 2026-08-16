@@ -141,7 +141,6 @@ export function ChannelReport({ identifier }: { identifier: string }) {
   const followers = channel.followers ?? 0;
   const growthAudit = buildGrowthAudit(channel);
   const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
-  const verifiedIssues = growthAudit.filter((issue) => issue.classification === "verified");
   const health = calculateHealthScore(growthAudit, completedIds);
   const benchmarkLabel =
     followers < 50
@@ -332,18 +331,18 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <AlertTriangle className="size-6" />
             </span>
             <div>
-              <h2 className="font-display text-xl font-bold">CURRENT CHANNEL EVIDENCE</h2>
+              <h2 className="font-display text-xl font-bold">TWITCH CHANNEL HEALTH</h2>
               <p className="text-xs font-semibold text-foreground">
-                Findings confirmed from the latest public Twitch data.
+                Channel checks and growth actions for this streamer.
               </p>
             </div>
             <span className="rounded-full bg-destructive px-3 py-1 text-xs font-bold text-destructive-foreground">
-              {verifiedIssues.length} VERIFIED FINDINGS
+              {growthAudit.length} ISSUES IDENTIFIED
             </span>
           </div>
           <div className="mt-6 grid gap-5 md:grid-cols-3">
             <div className="rounded-xl bg-background/70 p-5 text-center">
-              <p className="text-xs text-muted-foreground">Current Evidence Score</p>
+              <p className="text-xs text-muted-foreground">Overall Health Score</p>
               <p className="mt-2 font-display text-4xl font-bold text-destructive">{health}%</p>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary">
                 <div

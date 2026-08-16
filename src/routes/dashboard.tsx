@@ -1118,9 +1118,9 @@ function ChannelAnalysis({
       <section className="border-t border-destructive/40 bg-destructive/5 p-6">
         <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle className="size-5 text-destructive" />
-          <h3 className="font-display font-bold text-destructive">CURRENT CHANNEL EVIDENCE</h3>
+          <h3 className="font-display font-bold text-destructive">TWITCH CHANNEL HEALTH</h3>
           <span className="rounded bg-destructive px-2 py-0.5 text-xs font-bold text-destructive-foreground">
-            {verifiedIssues.length} VERIFIED FINDINGS
+            {growthAudit.length} ISSUES IDENTIFIED
           </span>
           <button
             onClick={() =>
@@ -1135,7 +1135,7 @@ function ChannelAnalysis({
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-3">
           <div className="rounded-lg bg-background/50 p-4 text-center">
-            <p className="text-xs text-muted-foreground">Current Evidence Score</p>
+            <p className="text-xs text-muted-foreground">Overall Health Score</p>
             <p className="mt-2 font-display text-4xl font-bold text-destructive">{health}%</p>
             <div className="mt-3 h-2 rounded bg-secondary">
               <div className="h-2 rounded bg-destructive" style={{ width: `${health}%` }} />
@@ -1150,11 +1150,6 @@ function ChannelAnalysis({
             <p className="mt-2 text-sm font-bold text-cyan">{benchmarkLabel}</p>
           </div>
         </div>
-        <p className="mt-5 rounded-lg border border-cyan/30 bg-cyan/5 p-4 text-sm text-muted-foreground">
-          The score uses only {verifiedIssues.length} findings confirmed by the latest Twitch data.
-          {" "}{processIssues.length} growth recommendations below are not detected backend problems
-          and do not lower this score. Historical progress requires at least two saved snapshots.
-        </p>
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {growthAudit.map((issue) => {
             const saved = progress.find((item) => item.issue_id === issue.id);
