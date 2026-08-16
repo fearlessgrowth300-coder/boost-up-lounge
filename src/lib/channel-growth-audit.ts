@@ -17,6 +17,8 @@ export type GrowthAuditChannel = {
   avatar_url?: string | null;
   banner_url?: string | null;
   description?: string | null;
+  current_category?: string | null;
+  current_title?: string | null;
   recent_videos?: unknown;
 };
 
@@ -74,7 +76,43 @@ export function getAuditActionPlan(issue: GrowthAuditItem) {
   };
 }
 
-export function calculateHealthScore(issues: GrowthAuditItem[], completedIds: string[] = []) {
+export function calculateHealthScore(
+  issues: GrowthAuditItem[],
+  completedIds: string[] = [],
+  channel?: GrowthAuditChannel,
+) {
+  if (channel) {
+    const followers = Math.max(0, channel.followers ?? 0);
+    const videos = (Array.isArray(channel.recent_videos) ? channel.recent_videos : []) as AuditVideo[];
+    const averageViews = videos.length
+      ? videos.reduce((total, video) => total + Number(video.viewCount ?? 0), 0) / videos.length
+      : 0;
+    let score = 0;
+
+    // Award points only for evidence that Twitch returned for this channel.
+    if (channel.avatar_url) score += 12;
+    if (channel.banner_url) score += 10;
+    if ((channel.description?.trim().length ?? 0) >= 80) score += 12;
+    if (channel.current_category) score += 5;
+    if (channel.current_title) score += 5;
+    if (channel.is_live) score += 8;
+    score += Math.min(18, Math.round((followers / 1000) * 18));
+    if (followers >= 25) score += 7; // Twitch Affiliate follower milestone.
+    if (videos.length) score += 10;
+    score += Math.min(13, Math.round((averageViews / 100) * 13));
+
+    // A completed measurable issue is a small credit until the next refresh can
+    // confirm the actual Twitch channel data changed.
+    const measurableIds = new Set(
+      issues.filter((issue) => getAuditClassification(issue) === "verified").map((issue) => issue.id),
+    );
+    score += Math.min(
+      8,
+      completedIds.filter((id) => measurableIds.has(id)).length * 2,
+    );
+    return Math.max(0, Math.min(100, score));
+  }
+
   const completed = new Set(completedIds);
   const penalty = issues.reduce((total, issue) => {
     if (completed.has(issue.id)) return total;

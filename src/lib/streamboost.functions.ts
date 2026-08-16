@@ -35,7 +35,16 @@ function snapshotIssueMetrics(stats: Stats) {
   const verifiedIssues = issues.filter((issue) => issue.classification === "verified");
   return {
     issue_count: verifiedIssues.length,
-    health_score: calculateHealthScore(issues),
+    health_score: calculateHealthScore(issues, [], {
+      followers: stats.followers,
+      is_live: stats.isLive,
+      avatar_url: stats.avatarUrl,
+      banner_url: stats.bannerUrl,
+      description: stats.description,
+      current_category: stats.currentCategory,
+      current_title: stats.currentTitle,
+      recent_videos: stats.recentVideos,
+    }),
   };
 }
 

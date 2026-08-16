@@ -512,7 +512,7 @@ function ChannelAnalysis({
   }
 
   const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
-  const health = calculateHealthScore(growthAudit, completedIds);
+  const health = calculateHealthScore(growthAudit, completedIds, channel);
   const verifiedIssues = growthAudit.filter((issue) => issue.classification === "verified");
   const processIssues = growthAudit.filter((issue) => issue.classification === "process");
   const completedCount = completedIds.filter((id) =>

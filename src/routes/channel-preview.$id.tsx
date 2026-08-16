@@ -141,7 +141,7 @@ export function ChannelReport({ identifier }: { identifier: string }) {
   const followers = channel.followers ?? 0;
   const growthAudit = buildGrowthAudit(channel);
   const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
-  const health = calculateHealthScore(growthAudit, completedIds);
+  const health = calculateHealthScore(growthAudit, completedIds, channel);
   const benchmarkLabel =
     followers < 50
       ? "Emerging channel · 0–49 followers"
