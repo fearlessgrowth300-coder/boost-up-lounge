@@ -139,11 +139,17 @@ export function ChannelReport({ identifier }: { identifier: string }) {
   const followers = channel.followers ?? 0;
   const growthAudit = buildGrowthAudit(channel);
   const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
+  const verifiedIssues = growthAudit.filter((issue) => issue.classification === "verified");
+  const processIssues = growthAudit.filter((issue) => issue.classification === "process");
+  const completedVerifiedIds = completedIds.filter((id) =>
+    verifiedIssues.some((issue) => issue.id === id),
+  );
   const health = calculateHealthScore(growthAudit, completedIds);
   const firstSnapshot = snapshots[0];
   const latestSnapshot = snapshots.at(-1);
   const followerChange =
     firstSnapshot && latestSnapshot ? latestSnapshot.followers - firstSnapshot.followers : 0;
+  const hasHistoricalData = snapshots.length >= 2;
   const benchmarkLabel =
     followers < 50
       ? "Emerging channel · 0–49 followers"
@@ -332,11 +338,13 @@ export function ChannelReport({ identifier }: { identifier: string }) {
             <div>
               <h2 className="font-display text-xl font-bold">Channel Improvement Timeline</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Before, current, and completed work from saved Twitch backend snapshots.
+                {hasHistoricalData
+                  ? "Before, current, and completed work from saved Twitch backend snapshots."
+                  : "A baseline is being established. Historical improvement appears after at least two saved Twitch snapshots."}
               </p>
             </div>
             <span className="rounded-full bg-neon/10 px-3 py-1 text-xs font-bold text-neon">
-              {completedIds.length} issues completed
+              {completedVerifiedIds.length} verified issues completed
             </span>
           </div>
           <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -348,7 +356,7 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <p className="mt-1 text-xs text-muted-foreground">
                 {firstSnapshot
                   ? new Date(firstSnapshot.recorded_at).toLocaleDateString()
-                  : "Initial analysis"}
+                  : "No saved baseline yet"}
               </p>
             </div>
             <div className="rounded-xl bg-secondary/60 p-4">
@@ -356,16 +364,19 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <p className="mt-1 font-display text-2xl font-bold text-neon">
                 {followers.toLocaleString()} followers
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">Health score {health}%</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Current evidence score {health}%
+              </p>
             </div>
             <div className="rounded-xl bg-secondary/60 p-4">
               <p className="text-xs text-muted-foreground">Follower improvement</p>
               <p className="mt-1 font-display text-2xl font-bold text-cyan">
-                {followerChange >= 0 ? "+" : ""}
-                {followerChange}
+                {hasHistoricalData ? `${followerChange >= 0 ? "+" : ""}${followerChange}` : "—"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Across {snapshots.length} saved snapshots
+                {hasHistoricalData
+                  ? `Across ${snapshots.length} saved snapshots`
+                  : `${snapshots.length} saved snapshot${snapshots.length === 1 ? "" : "s"} · 2 needed for comparison`}
               </p>
             </div>
           </div>
@@ -377,18 +388,18 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <AlertTriangle className="size-6" />
             </span>
             <div>
-              <h2 className="font-display text-xl font-bold">🚨 CHANNEL ISSUES DETECTED</h2>
+              <h2 className="font-display text-xl font-bold">CURRENT CHANNEL EVIDENCE</h2>
               <p className="text-xs font-semibold text-foreground">
-                Immediate action required to grow your channel
+                Findings confirmed from the latest public Twitch data.
               </p>
             </div>
             <span className="rounded-full bg-destructive px-3 py-1 text-xs font-bold text-destructive-foreground">
-              {growthAudit.length} ISSUES
+              {verifiedIssues.length} VERIFIED FINDINGS
             </span>
           </div>
           <div className="mt-6 grid gap-5 md:grid-cols-3">
             <div className="rounded-xl bg-background/70 p-5 text-center">
-              <p className="text-xs text-muted-foreground">Overall Health Score</p>
+              <p className="text-xs text-muted-foreground">Current Evidence Score</p>
               <p className="mt-2 font-display text-4xl font-bold text-destructive">{health}%</p>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary">
                 <div
@@ -406,6 +417,14 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <p className="mt-3 text-sm font-bold text-cyan">{benchmarkLabel}</p>
             </div>
           </div>
+          <p className="mt-5 rounded-lg border border-cyan/30 bg-cyan/5 p-4 text-sm text-muted-foreground">
+            This score uses only the {verifiedIssues.length} findings confirmed from the latest
+            Twitch response. {processIssues.length} growth recommendations are shown below as
+            optional next steps; they are not counted as detected problems and do not reduce the score.
+            {hasHistoricalData
+              ? " Historical comparisons are based on saved snapshots."
+              : " Historical progress will be available after at least two snapshots are saved."}
+          </p>
           <div className="mt-5 space-y-4">
             {growthAudit.map((issue) => {
               const saved = progress.find((item) => item.issue_id === issue.id);
@@ -428,9 +447,11 @@ export function ChannelReport({ identifier }: { identifier: string }) {
                       <span className="rounded-full border border-foreground px-2.5 py-1 text-xs font-bold uppercase text-foreground">
                         {saved?.completed
                           ? "Completed"
-                          : issue.status === "critical"
-                            ? "Critical"
-                            : "Warning"}
+                          : issue.classification === "process"
+                            ? "Recommended"
+                            : issue.status === "critical"
+                              ? "Critical"
+                              : "Warning"}
                       </span>
                       <span
                         className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${issue.classification === "verified" ? "bg-cyan/15 text-cyan" : "bg-orange/15 text-orange"}`}

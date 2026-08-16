@@ -107,8 +107,8 @@ function ProgressPage() {
                   />
                   <Metric
                     icon={CheckCircle2}
-                    label="Issues completed"
-                    value={`${completed.length}/${audit.length}`}
+                    label="Verified findings completed"
+                    value={`${completed.length}/${audit.filter((item) => item.classification === "verified").length}`}
                   />
                   <Metric icon={Activity} label="Saved snapshots" value={String(rows.length)} />
                 </div>
@@ -121,9 +121,7 @@ function ProgressPage() {
                         </b>
                         <span className="mt-2 block text-cyan">{row.followers} followers</span>
                         <span className="block text-neon">{row.health_score}% health</span>
-                        <span className="block text-muted-foreground">
-                          {row.issue_count} issues
-                        </span>
+                        <span className="block text-muted-foreground">Current evidence snapshot</span>
                       </div>
                     ))}
                   </div>

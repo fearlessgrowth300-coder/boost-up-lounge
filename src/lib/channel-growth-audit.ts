@@ -21,6 +21,15 @@ export type GrowthAuditChannel = {
 type AuditVideo = { viewCount?: number };
 
 const PROCESS_ISSUE_IDS = new Set([
+  // These are growth recommendations. Twitch's public API does not expose enough
+  // evidence to diagnose them as current channel failures.
+  "algorithmic-flags-visibility-block",
+  "unoptimized-metadata-discovery-gaps",
+  "poor-seo-performance",
+  "weak-on-page-seo",
+  "technical-seo-channel-health",
+  "unfocused-audience-targeting",
+  "inconsistent-unprofessional-branding",
   "low-viewer-engagement-retention",
   "awareness",
   "evaluation",
@@ -66,6 +75,9 @@ export function getAuditActionPlan(issue: GrowthAuditItem) {
 export function calculateHealthScore(issues: GrowthAuditItem[], completedIds: string[] = []) {
   const completed = new Set(completedIds);
   const penalty = issues.reduce((total, issue) => {
+    // A recommendation is useful guidance, not a measured defect. It must never
+    // reduce a channel's evidence-based score.
+    if (getAuditClassification(issue) !== "verified") return total;
     if (completed.has(issue.id)) return total;
     return total + (issue.status === "critical" ? 5 : 3);
   }, 0);

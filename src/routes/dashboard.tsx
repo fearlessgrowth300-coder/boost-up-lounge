@@ -401,6 +401,7 @@ function ChannelAnalysis({
   );
   const firstSnapshot = orderedSnapshots[0];
   const latestSnapshot = orderedSnapshots.at(-1);
+  const hasHistoricalData = orderedSnapshots.length >= 2;
   const followerChange =
     firstSnapshot && latestSnapshot ? latestSnapshot.followers - firstSnapshot.followers : 0;
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -514,7 +515,9 @@ function ChannelAnalysis({
   const health = calculateHealthScore(growthAudit, completedIds);
   const verifiedIssues = growthAudit.filter((issue) => issue.classification === "verified");
   const processIssues = growthAudit.filter((issue) => issue.classification === "process");
-  const completedCount = completedIds.length;
+  const completedCount = completedIds.filter((id) =>
+    verifiedIssues.some((issue) => issue.id === id),
+  ).length;
   const topVideo = [...recentVideos].sort((a, b) => b.viewCount - a.viewCount)[0];
   const benchmarkLabel =
     followers < 50
@@ -614,7 +617,9 @@ function ChannelAnalysis({
           <div>
             <h3 className="font-display text-lg font-bold">Improvement Tracking</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              A new snapshot is saved whenever this channel is analyzed or refreshed.
+              {hasHistoricalData
+                ? "Comparing saved Twitch snapshots over time."
+                : "A baseline is being established. Refresh the channel again to begin a historical comparison."}
             </p>
           </div>
           <span className="rounded-full bg-neon/10 px-3 py-1 text-xs font-bold text-neon">
@@ -625,10 +630,9 @@ function ChannelAnalysis({
           <div className="rounded-lg bg-secondary/60 p-4">
             <p className="text-xs text-muted-foreground">Follower Change</p>
             <p
-              className={`mt-1 font-display text-2xl font-bold ${followerChange >= 0 ? "text-neon" : "text-destructive"}`}
+              className={`mt-1 font-display text-2xl font-bold ${!hasHistoricalData || followerChange >= 0 ? "text-neon" : "text-destructive"}`}
             >
-              {followerChange >= 0 ? "+" : ""}
-              {followerChange}
+              {hasHistoricalData ? `${followerChange >= 0 ? "+" : ""}${followerChange}` : "—"}
             </p>
           </div>
           <div className="rounded-lg bg-secondary/60 p-4">
@@ -636,7 +640,7 @@ function ChannelAnalysis({
             <p className="mt-1 font-semibold">
               {firstSnapshot
                 ? new Date(firstSnapshot.recorded_at).toLocaleDateString()
-                : "Waiting for first refresh"}
+                : "No saved baseline yet"}
             </p>
           </div>
           <div className="rounded-lg bg-secondary/60 p-4">
@@ -881,7 +885,7 @@ function ChannelAnalysis({
             </p>
           </div>
           <span className="rounded-full bg-neon/10 px-3 py-1 text-xs font-bold text-neon">
-            {completedCount}/{growthAudit.length} completed
+            {completedCount}/{verifiedIssues.length} verified completed
           </span>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1114,9 +1118,9 @@ function ChannelAnalysis({
       <section className="border-t border-destructive/40 bg-destructive/5 p-6">
         <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle className="size-5 text-destructive" />
-          <h3 className="font-display font-bold text-destructive">CHANNEL ISSUES DETECTED</h3>
+          <h3 className="font-display font-bold text-destructive">CURRENT CHANNEL EVIDENCE</h3>
           <span className="rounded bg-destructive px-2 py-0.5 text-xs font-bold text-destructive-foreground">
-            {growthAudit.length} ISSUES
+            {verifiedIssues.length} VERIFIED FINDINGS
           </span>
           <button
             onClick={() =>
@@ -1131,7 +1135,7 @@ function ChannelAnalysis({
         </div>
         <div className="mt-6 grid gap-5 md:grid-cols-3">
           <div className="rounded-lg bg-background/50 p-4 text-center">
-            <p className="text-xs text-muted-foreground">Overall Health Score</p>
+            <p className="text-xs text-muted-foreground">Current Evidence Score</p>
             <p className="mt-2 font-display text-4xl font-bold text-destructive">{health}%</p>
             <div className="mt-3 h-2 rounded bg-secondary">
               <div className="h-2 rounded bg-destructive" style={{ width: `${health}%` }} />
@@ -1146,6 +1150,11 @@ function ChannelAnalysis({
             <p className="mt-2 text-sm font-bold text-cyan">{benchmarkLabel}</p>
           </div>
         </div>
+        <p className="mt-5 rounded-lg border border-cyan/30 bg-cyan/5 p-4 text-sm text-muted-foreground">
+          The score uses only {verifiedIssues.length} findings confirmed by the latest Twitch data.
+          {" "}{processIssues.length} growth recommendations below are not detected backend problems
+          and do not lower this score. Historical progress requires at least two saved snapshots.
+        </p>
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {growthAudit.map((issue) => {
             const saved = progress.find((item) => item.issue_id === issue.id);
@@ -1166,7 +1175,11 @@ function ChannelAnalysis({
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <span className="shrink-0 rounded-full border border-foreground px-2 py-1 text-[10px] font-bold uppercase text-foreground">
-                      {issue.status === "critical" ? "Critical" : "Warning"}
+                      {issue.classification === "process"
+                        ? "Recommended"
+                        : issue.status === "critical"
+                          ? "Critical"
+                          : "Warning"}
                     </span>
                     <span
                       className={`rounded-full px-2 py-1 text-[10px] font-extrabold uppercase ${issue.classification === "verified" ? "bg-cyan/15 text-cyan" : "bg-orange/15 text-orange"}`}

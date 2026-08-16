@@ -24,19 +24,17 @@ function secureTokenPart() {
 }
 
 function snapshotIssueMetrics(stats: Stats) {
-  const count = buildGrowthAudit({
-    followers: stats.followers,
-    is_live: stats.isLive,
-    description: stats.description,
-    recent_videos: stats.recentVideos,
-  }).length;
   const issues = buildGrowthAudit({
     followers: stats.followers,
     is_live: stats.isLive,
     description: stats.description,
     recent_videos: stats.recentVideos,
   });
-  return { issue_count: count, health_score: calculateHealthScore(issues) };
+  const verifiedIssues = issues.filter((issue) => issue.classification === "verified");
+  return {
+    issue_count: verifiedIssues.length,
+    health_score: calculateHealthScore(issues),
+  };
 }
 
 const urlInput = z.object({ url: z.string().min(4).max(300) });
