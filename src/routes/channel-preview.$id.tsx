@@ -137,21 +137,12 @@ export function ChannelReport({ identifier }: { identifier: string }) {
     );
   }
 
-  const { channel, clicks, snapshots = [], progress = [] } = data;
+  const { channel, clicks, progress = [] } = data;
   const followers = channel.followers ?? 0;
   const growthAudit = buildGrowthAudit(channel);
   const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
   const verifiedIssues = growthAudit.filter((issue) => issue.classification === "verified");
-  const processIssues = growthAudit.filter((issue) => issue.classification === "process");
-  const completedVerifiedIds = completedIds.filter((id) =>
-    verifiedIssues.some((issue) => issue.id === id),
-  );
   const health = calculateHealthScore(growthAudit, completedIds);
-  const firstSnapshot = snapshots[0];
-  const latestSnapshot = snapshots.at(-1);
-  const followerChange =
-    firstSnapshot && latestSnapshot ? latestSnapshot.followers - firstSnapshot.followers : 0;
-  const hasHistoricalData = snapshots.length >= 2;
   const benchmarkLabel =
     followers < 50
       ? "Emerging channel · 0–49 followers"
@@ -335,55 +326,6 @@ export function ChannelReport({ identifier }: { identifier: string }) {
           </div>
         </section>
 
-        <section className="sb-card p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-display text-xl font-bold">Channel Improvement Timeline</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {hasHistoricalData
-                  ? "Before, current, and completed work from saved Twitch backend snapshots."
-                  : "A baseline is being established. Historical improvement appears after at least two saved Twitch snapshots."}
-              </p>
-            </div>
-            <span className="rounded-full bg-neon/10 px-3 py-1 text-xs font-bold text-neon">
-              {completedVerifiedIds.length} verified issues completed
-            </span>
-          </div>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl bg-secondary/60 p-4">
-              <p className="text-xs text-muted-foreground">Before tracking</p>
-              <p className="mt-1 font-display text-2xl font-bold">
-                {firstSnapshot?.followers ?? followers} followers
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {firstSnapshot
-                  ? new Date(firstSnapshot.recorded_at).toLocaleDateString()
-                  : "No saved baseline yet"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-secondary/60 p-4">
-              <p className="text-xs text-muted-foreground">Current result</p>
-              <p className="mt-1 font-display text-2xl font-bold text-neon">
-                {followers.toLocaleString()} followers
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Current evidence score {health}%
-              </p>
-            </div>
-            <div className="rounded-xl bg-secondary/60 p-4">
-              <p className="text-xs text-muted-foreground">Follower improvement</p>
-              <p className="mt-1 font-display text-2xl font-bold text-cyan">
-                {hasHistoricalData ? `${followerChange >= 0 ? "+" : ""}${followerChange}` : "—"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {hasHistoricalData
-                  ? `Across ${snapshots.length} saved snapshots`
-                  : `${snapshots.length} saved snapshot${snapshots.length === 1 ? "" : "s"} · 2 needed for comparison`}
-              </p>
-            </div>
-          </div>
-        </section>
-
         <section className="rounded-xl border border-destructive/50 bg-destructive/5 p-6">
           <div className="flex flex-wrap items-center gap-3 text-destructive">
             <span className="rounded-lg border border-destructive p-3">
@@ -419,14 +361,6 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <p className="mt-3 text-sm font-bold text-cyan">{benchmarkLabel}</p>
             </div>
           </div>
-          <p className="mt-5 rounded-lg border border-cyan/30 bg-cyan/5 p-4 text-sm text-muted-foreground">
-            This score uses only the {verifiedIssues.length} findings confirmed from the latest
-            Twitch response. {processIssues.length} growth recommendations are shown below as
-            optional next steps; they are not counted as detected problems and do not reduce the score.
-            {hasHistoricalData
-              ? " Historical comparisons are based on saved snapshots."
-              : " Historical progress will be available after at least two snapshots are saved."}
-          </p>
           <div className="mt-5 space-y-4">
             {growthAudit.map((issue) => {
               const saved = progress.find((item) => item.issue_id === issue.id);
