@@ -17,6 +17,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Logo } from "@/components/sb/logo";
+import { GameIntelligencePanel } from "@/components/sb/game-intelligence";
 import {
   buildGrowthAudit,
   calculateHealthScore,
@@ -262,6 +263,9 @@ export function ChannelReport({ identifier }: { identifier: string }) {
               <p className="text-xs text-muted-foreground">Latest Stream Title</p>
               <p className="mt-1 font-semibold">{channel.current_title ?? "Not currently set"}</p>
             </div>
+          </div>
+          <div className="border-t border-border p-6">
+            <GameIntelligencePanel category={channel.platform === "twitch" ? channel.current_category : null} />
           </div>
           <div className="grid gap-4 border-t border-border p-6 md:grid-cols-2">
             <OfflineCover offline={!channel.is_live}>

@@ -53,6 +53,72 @@ const bulkUrlInput = z.object({
   urls: z.array(z.string().min(4).max(300)).min(1).max(25),
 });
 
+type GameIntelligence = {
+  name: string;
+  summary: string | null;
+  coverUrl: string | null;
+  genres: string[];
+  platforms: string[];
+  releaseDate: string | null;
+  rating: number | null;
+  igdbUrl: string | null;
+};
+
+const gameIntelligenceCache = new Map<string, { expiresAt: number; value: GameIntelligence | null }>();
+
+async function fetchGameIntelligence(category: string): Promise<GameIntelligence | null> {
+  const normalized = category.trim().toLowerCase();
+  if (!normalized || ["just chatting", "pools, hot tubs, and beaches", "music"].includes(normalized)) {
+    return null;
+  }
+  const cached = gameIntelligenceCache.get(normalized);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const clientId = process.env["TWITCH_CLIENT_ID"];
+  const clientSecret = process.env["TWITCH_CLIENT_SECRET"];
+  if (!clientId || !clientSecret) return null;
+  try {
+    const accessToken = await getTwitchAppToken(clientId, clientSecret);
+    const response = await fetch("https://api.igdb.com/v4/games", {
+      method: "POST",
+      headers: {
+        "Client-ID": clientId,
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "text/plain",
+      },
+      body: `search ${JSON.stringify(category.trim())}; fields name,summary,cover.url,genres.name,platforms.name,first_release_date,rating,url; limit 1;`,
+    });
+    if (!response.ok) throw new Error(`IGDB lookup failed [${response.status}]`);
+    const game = ((await response.json()) as Array<any>)[0];
+    const value = game
+      ? {
+          name: game.name,
+          summary: typeof game.summary === "string" ? game.summary : null,
+          coverUrl: game.cover?.url ? `https:${String(game.cover.url).replace("t_thumb", "t_cover_big")}` : null,
+          genres: Array.isArray(game.genres) ? game.genres.map((genre: any) => genre.name).filter(Boolean) : [],
+          platforms: Array.isArray(game.platforms)
+            ? game.platforms.map((platform: any) => platform.name).filter(Boolean)
+            : [],
+          releaseDate: game.first_release_date
+            ? new Date(Number(game.first_release_date) * 1000).toISOString()
+            : null,
+          rating: typeof game.rating === "number" ? Math.round(game.rating) : null,
+          igdbUrl: typeof game.url === "string" ? `https://www.igdb.com${game.url}` : null,
+        }
+      : null;
+    gameIntelligenceCache.set(normalized, { value, expiresAt: Date.now() + 6 * 60 * 60 * 1000 });
+    return value;
+  } catch (error) {
+    console.warn("IGDB game lookup failed", error);
+    gameIntelligenceCache.set(normalized, { value: null, expiresAt: Date.now() + 10 * 60 * 1000 });
+    return null;
+  }
+}
+
+export const getGameIntelligence = createServerFn({ method: "GET" })
+  .inputValidator((data: unknown) => z.object({ category: z.string().trim().min(1).max(160) }).parse(data))
+  .handler(async ({ data }) => fetchGameIntelligence(data.category));
+
 function accountEmail(claims: Record<string, unknown>) {
   return typeof claims.email === "string" ? claims.email : null;
 }

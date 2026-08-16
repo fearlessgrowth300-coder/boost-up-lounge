@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/sb/app-header";
+import { GameIntelligencePanel } from "@/components/sb/game-intelligence";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import {
@@ -665,6 +666,9 @@ function ChannelAnalysis({
               <p className="text-xs text-muted-foreground">Latest Stream Title</p>
               <p className="mt-1 font-semibold">{channel.current_title ?? "Not set"}</p>
             </div>
+          </div>
+          <div className="mt-4">
+            <GameIntelligencePanel category={channel.platform === "twitch" ? channel.current_category : null} />
           </div>
         </section>
       )}
