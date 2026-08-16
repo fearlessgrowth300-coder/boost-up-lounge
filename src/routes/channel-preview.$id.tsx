@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/sb/logo";
 import { GameIntelligencePanel } from "@/components/sb/game-intelligence";
+import { ImprovementProgress } from "@/components/sb/improvement-progress";
 import {
   buildGrowthAudit,
   calculateHealthScore,
@@ -138,7 +139,7 @@ export function ChannelReport({ identifier }: { identifier: string }) {
     );
   }
 
-  const { channel, clicks, progress = [] } = data;
+  const { channel, clicks, snapshots = [], progress = [] } = data;
   const followers = channel.followers ?? 0;
   const growthAudit = buildGrowthAudit(channel);
   const completedIds = progress.filter((item) => item.completed).map((item) => item.issue_id);
@@ -328,6 +329,8 @@ export function ChannelReport({ identifier }: { identifier: string }) {
             )}
           </div>
         </section>
+
+        <ImprovementProgress snapshots={snapshots} />
 
         <section className="rounded-xl border border-destructive/50 bg-destructive/5 p-6">
           <div className="flex flex-wrap items-center gap-3 text-destructive">

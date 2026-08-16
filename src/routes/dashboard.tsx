@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { AppHeader } from "@/components/sb/app-header";
 import { GameIntelligencePanel } from "@/components/sb/game-intelligence";
+import { ImprovementProgress } from "@/components/sb/improvement-progress";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import {
@@ -654,6 +655,10 @@ function ChannelAnalysis({
           </div>
         </div>
       </section>
+
+      <div className="border-t border-border p-6">
+        <ImprovementProgress snapshots={snapshots} />
+      </div>
 
       {(channel.current_category || channel.current_title) && (
         <section className="border-t border-border p-6">
