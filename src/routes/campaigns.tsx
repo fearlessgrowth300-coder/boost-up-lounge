@@ -5,7 +5,7 @@ import { Copy, ExternalLink, FileText, MousePointerClick, Rocket } from "lucide-
 import { toast } from "sonner";
 import { AppHeader } from "@/components/sb/app-header";
 import { useAppAuth } from "@/hooks/use-app-auth";
-import { listChannels, listGrowthWorkspace } from "@/lib/streamboost.functions";
+import { getAccountSettings, listChannels, listGrowthWorkspace } from "@/lib/streamboost.functions";
 
 export const Route = createFileRoute("/campaigns")({ component: CampaignsPage });
 
@@ -13,6 +13,7 @@ function CampaignsPage() {
   const ready = useAppAuth();
   const channelsFn = useServerFn(listChannels);
   const workspaceFn = useServerFn(listGrowthWorkspace);
+  const settingsFn = useServerFn(getAccountSettings);
   const { data: channels } = useQuery({
     queryKey: ["channels"],
     queryFn: () => channelsFn({}),
@@ -21,6 +22,11 @@ function CampaignsPage() {
   const { data: growth } = useQuery({
     queryKey: ["growth-workspace"],
     queryFn: () => workspaceFn({}),
+    enabled: ready,
+  });
+  const { data: settings } = useQuery({
+    queryKey: ["account-settings"],
+    queryFn: () => settingsFn({}),
     enabled: ready,
   });
 
@@ -98,14 +104,16 @@ function CampaignsPage() {
                   </div>
                 ) : null}
                 <div className="mt-5 flex flex-wrap gap-2">
-                  <a
-                    href="https://www.fiverr.com/harper_harvey_f"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-lg border border-border px-3 py-2 text-xs font-bold"
-                  >
-                    Verify Fiverr Payment
-                  </a>
+                  {settings?.fiverrProfileUrl ? (
+                    <a
+                      href={settings.fiverrProfileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-border px-3 py-2 text-xs font-bold"
+                    >
+                      Verify Fiverr Payment
+                    </a>
+                  ) : null}
                   <a
                     href={`/dashboard#channels`}
                     className="rounded-lg border border-border px-3 py-2 text-xs font-bold"

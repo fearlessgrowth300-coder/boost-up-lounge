@@ -46,6 +46,20 @@ function accountEmail(claims: Record<string, unknown>) {
   return typeof claims.email === "string" ? claims.email : null;
 }
 
+function normalizeFiverrProfileUrl(value: string | null) {
+  if (!value?.trim()) return null;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("Enter a valid Fiverr profile or gig URL.");
+  }
+  if (url.protocol !== "https:" || !["fiverr.com", "www.fiverr.com"].includes(url.hostname)) {
+    throw new Error("Use an HTTPS link from fiverr.com.");
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
 async function notifyChannelImprovement(input: {
   supabase: any;
   userId: string;
@@ -284,6 +298,32 @@ export const listGrowthWorkspace = createServerFn({ method: "GET" })
       workspace: workspace.data ?? [],
       tokens: tokens.data ?? [],
     };
+  });
+
+export const getAccountSettings = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await (context.supabase as any)
+      .from("profiles")
+      .select("fiverr_profile_url")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return { fiverrProfileUrl: data?.fiverr_profile_url ?? null };
+  });
+
+export const saveAccountSettings = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z.object({ fiverrProfileUrl: z.string().max(500).nullable() }).parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const fiverrProfileUrl = normalizeFiverrProfileUrl(data.fiverrProfileUrl);
+    const { error } = await (context.supabase as any)
+      .from("profiles")
+      .upsert({ id: context.userId, fiverr_profile_url: fiverrProfileUrl }, { onConflict: "id" });
+    if (error) throw new Error(error.message);
+    return { fiverrProfileUrl };
   });
 
 export const recordPaymentAwaitingVerification = createServerFn({ method: "POST" })
@@ -856,7 +896,7 @@ export const getPublicReport = createServerFn({ method: "GET" })
     if (!channel) return null;
     const channelId = channel.id;
 
-    const [{ data: clicks }, { data: snapshots }, { data: progress }] = await Promise.all([
+    const [{ data: clicks }, { data: snapshots }, { data: progress }, { data: fiverrProfileUrl }] = await Promise.all([
       client
         .from("clicks")
         .select("created_at, country, source_domain, referrer, converted")
@@ -875,9 +915,16 @@ export const getPublicReport = createServerFn({ method: "GET" })
         .from("channel_issue_progress")
         .select("issue_id, completed, evidence_url, target_date, completed_at")
         .eq("channel_id", channelId),
+      (client as any).rpc("get_channel_fiverr_profile", { target_channel_id: channelId }),
     ]);
 
-    return { channel, clicks: clicks ?? [], snapshots: snapshots ?? [], progress: progress ?? [] };
+    return {
+      channel,
+      clicks: clicks ?? [],
+      snapshots: snapshots ?? [],
+      progress: progress ?? [],
+      fiverrProfileUrl: typeof fiverrProfileUrl === "string" ? fiverrProfileUrl : null,
+    };
   });
 
 type RecentVideo = {

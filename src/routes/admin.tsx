@@ -8,6 +8,7 @@ import { AppHeader } from "@/components/sb/app-header";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import {
   completeCampaign,
+  getAccountSettings,
   listChannels,
   listGrowthWorkspace,
   revokeCampaignToken,
@@ -22,6 +23,7 @@ function AdminPage() {
   const workspaceFn = useServerFn(listGrowthWorkspace);
   const revokeFn = useServerFn(revokeCampaignToken);
   const completeFn = useServerFn(completeCampaign);
+  const settingsFn = useServerFn(getAccountSettings);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const { data: channels = [] } = useQuery({
     queryKey: ["channels"],
@@ -31,6 +33,11 @@ function AdminPage() {
   const { data: growth } = useQuery({
     queryKey: ["growth-workspace"],
     queryFn: () => workspaceFn({}),
+    enabled: ready,
+  });
+  const { data: settings } = useQuery({
+    queryKey: ["account-settings"],
+    queryFn: () => settingsFn({}),
     enabled: ready,
   });
   const tokens = growth?.tokens ?? [];
@@ -66,14 +73,16 @@ function AdminPage() {
               Verify Fiverr orders, monitor active campaigns, and revoke compromised tokens.
             </p>
           </div>
-          <a
-            href="https://www.fiverr.com/harper_harvey_f"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg bg-neon px-4 py-2 text-sm font-bold text-primary-foreground"
-          >
-            Open Fiverr <ExternalLink className="size-4" />
-          </a>
+          {settings?.fiverrProfileUrl ? (
+            <a
+              href={settings.fiverrProfileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg bg-neon px-4 py-2 text-sm font-bold text-primary-foreground"
+            >
+              Open Fiverr <ExternalLink className="size-4" />
+            </a>
+          ) : null}
         </div>
 
         <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

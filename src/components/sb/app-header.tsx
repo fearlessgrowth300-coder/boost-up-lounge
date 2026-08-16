@@ -13,6 +13,7 @@ const APP_LINKS = [
   { label: "Channels", to: "/channels" },
   { label: "Progress", to: "/progress" },
   { label: "Campaigns", to: "/campaigns" },
+  { label: "Account", to: "/account" },
   { label: "Admin", to: "/admin" },
 ] as const;
 
@@ -81,6 +82,21 @@ export function AppHeader() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const refreshChannels = useServerFn(autoRefreshChannels);
+
+  // The management app is installable. Public streamer reports deliberately do
+  // not load a manifest or service worker, so sharing a report never promotes
+  // installation or account creation to the recipient.
+  useEffect(() => {
+    const manifest = document.createElement("link");
+    manifest.rel = "manifest";
+    manifest.href = "/manifest.webmanifest";
+    manifest.dataset.streamboostManifest = "owner-app";
+    document.head.append(manifest);
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js");
+    }
+    return () => manifest.remove();
+  }, []);
 
   useEffect(() => {
     let running = false;

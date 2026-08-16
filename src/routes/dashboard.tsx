@@ -1399,6 +1399,7 @@ function DashboardPage() {
   const [bulkUrls, setBulkUrls] = useState("");
   const [channelSearch, setChannelSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState<"all" | "live" | "follow-up">("all");
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const dashboard = useServerFn(getDashboard);
   const channelsFn = useServerFn(listChannels);
@@ -1510,6 +1511,24 @@ function DashboardPage() {
       tone: "text-neon",
     },
   ];
+  const filteredChannels = (channels ?? []).filter((channel) => {
+    const workspace = (growthWorkspace?.workspace ?? []).find(
+      (item) => item.channel_id === channel.id,
+    );
+    const query = channelSearch.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      [channel.username, channel.platform, ...(workspace?.tags ?? [])].some((value) =>
+        value.toLowerCase().includes(query),
+      );
+    const matchesFilter =
+      channelFilter === "all" ||
+      (channelFilter === "live" && channel.is_live) ||
+      (channelFilter === "follow-up" && Boolean(workspace?.follow_up_at));
+    return matchesSearch && matchesFilter;
+  });
+  const selectedChannel =
+    filteredChannels.find((channel) => channel.id === selectedChannelId) ?? filteredChannels[0];
 
   async function refresh(id: string) {
     if (refreshingId) return;
@@ -1751,52 +1770,66 @@ function DashboardPage() {
               <option value="follow-up">Follow-up scheduled</option>
             </select>
           </div>
-          <div className="space-y-8">
-            {(channels ?? [])
-              .filter((channel) => {
-                const workspace = (growthWorkspace?.workspace ?? []).find(
-                  (item) => item.channel_id === channel.id,
-                );
-                const query = channelSearch.trim().toLowerCase();
-                const matchesSearch =
-                  !query ||
-                  [channel.username, channel.platform, ...(workspace?.tags ?? [])].some((value) =>
-                    value.toLowerCase().includes(query),
-                  );
-                const matchesFilter =
-                  channelFilter === "all" ||
-                  (channelFilter === "live" && channel.is_live) ||
-                  (channelFilter === "follow-up" && Boolean(workspace?.follow_up_at));
-                return matchesSearch && matchesFilter;
-              })
-              .map((channel) => (
-                <ChannelAnalysis
+          {filteredChannels.length > 0 ? (
+            <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredChannels.map((channel) => (
+                <button
                   key={channel.id}
-                  channel={channel}
-                  snapshots={(snapshots ?? []).filter(
-                    (snapshot) => snapshot.channel_id === channel.id,
+                  type="button"
+                  onClick={() => setSelectedChannelId(channel.id)}
+                  className={`flex items-center gap-3 rounded-xl border p-4 text-left transition ${selectedChannel?.id === channel.id ? "border-neon bg-neon/10" : "border-border bg-secondary/30 hover:border-cyan"}`}
+                >
+                  {channel.avatar_url ? (
+                    <img src={channel.avatar_url} alt="" className="size-10 rounded-full object-cover" />
+                  ) : (
+                    <span className="flex size-10 items-center justify-center rounded-full bg-background font-display font-bold text-cyan">
+                      {channel.username.slice(0, 1).toUpperCase()}
+                    </span>
                   )}
-                  onRefresh={() => refresh(channel.id)}
-                  onDelete={() => remove(channel.id)}
-                  refreshing={refreshingId === channel.id}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-bold">{channel.username}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {channel.platform} · {channel.followers.toLocaleString()} followers
+                    </span>
+                  </span>
+                  <span className={`size-2.5 rounded-full ${channel.is_live ? "bg-neon" : "bg-muted-foreground"}`} />
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="space-y-8">
+            {selectedChannel ? (
+                <ChannelAnalysis
+                  key={selectedChannel.id}
+                  channel={selectedChannel}
+                  snapshots={(snapshots ?? []).filter(
+                    (snapshot) => snapshot.channel_id === selectedChannel.id,
+                  )}
+                  onRefresh={() => refresh(selectedChannel.id)}
+                  onDelete={() => remove(selectedChannel.id)}
+                  refreshing={refreshingId === selectedChannel.id}
                   progress={(growthWorkspace?.progress ?? []).filter(
-                    (item) => item.channel_id === channel.id,
+                    (item) => item.channel_id === selectedChannel.id,
                   )}
                   workspace={(growthWorkspace?.workspace ?? []).find(
-                    (item) => item.channel_id === channel.id,
+                    (item) => item.channel_id === selectedChannel.id,
                   )}
                   onSaveIssue={async (input) => {
-                    await saveIssueFn({ data: { channelId: channel.id, ...input } });
+                    await saveIssueFn({ data: { channelId: selectedChannel.id, ...input } });
                     await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
                     toast.success(input.completed ? "Issue marked complete" : "Issue reopened");
                   }}
                   onSaveWorkspace={async (input) => {
-                    await saveWorkspaceFn({ data: { channelId: channel.id, ...input } });
+                    await saveWorkspaceFn({ data: { channelId: selectedChannel.id, ...input } });
                     await queryClient.invalidateQueries({ queryKey: ["growth-workspace"] });
                     toast.success("Channel workspace saved");
                   }}
                 />
-              ))}
+            ) : channels && channels.length > 0 ? (
+              <div className="sb-card p-8 text-center text-muted-foreground">
+                No saved channels match this search or filter.
+              </div>
+            ) : null}
             {channels && channels.length === 0 && (
               <div className="sb-card p-10 text-center">
                 <p className="text-muted-foreground">No channels yet.</p>

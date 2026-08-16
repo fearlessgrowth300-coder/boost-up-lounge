@@ -92,15 +92,17 @@ function GoalBar({ label, value, goal }: { label: string; value: number; goal: n
   );
 }
 
-function OfflineCover({ children }: { children: React.ReactNode }) {
+function OfflineCover({ children, offline }: { children: React.ReactNode; offline: boolean }) {
   return (
     <div className="relative overflow-hidden rounded-xl border border-border bg-background">
-      <div className="pointer-events-none blur-[2px]">{children}</div>
-      <div className="absolute inset-0 flex items-center justify-center bg-background/30">
-        <span className="flex items-center gap-2 rounded-xl bg-destructive px-5 py-3 font-bold text-destructive-foreground shadow-xl">
-          <Clock3 className="size-5" /> Currently Offline
-        </span>
-      </div>
+      <div className={offline ? "pointer-events-none blur-[2px]" : undefined}>{children}</div>
+      {offline ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/30">
+          <span className="flex items-center gap-2 rounded-xl bg-destructive px-5 py-3 font-bold text-destructive-foreground shadow-xl">
+            <Clock3 className="size-5" /> Currently Offline
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -272,7 +274,7 @@ export function ChannelReport({ identifier }: { identifier: string }) {
             </div>
           </div>
           <div className="grid gap-4 border-t border-border p-6 md:grid-cols-2">
-            <OfflineCover>
+            <OfflineCover offline={!channel.is_live}>
               <iframe
                 title="Twitch stream"
                 src={playerUrl}
@@ -280,7 +282,7 @@ export function ChannelReport({ identifier }: { identifier: string }) {
                 allowFullScreen
               />
             </OfflineCover>
-            <OfflineCover>
+            <OfflineCover offline={!channel.is_live}>
               <iframe title="Twitch chat" src={chatUrl} className="aspect-video w-full" />
             </OfflineCover>
           </div>
@@ -699,14 +701,20 @@ export function ChannelReport({ identifier }: { identifier: string }) {
                 <small>one-time payment</small>
               </span>
             </div>
-            <a
-              href="https://www.fiverr.com/harper_harvey_f"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-5 block w-full rounded-lg bg-neon/10 py-3 text-center font-bold text-neon transition hover:bg-neon/20"
-            >
-              ✨ Purchase Campaign Token Now
-            </a>
+            {data.fiverrProfileUrl ? (
+              <a
+                href={data.fiverrProfileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-5 block w-full rounded-lg bg-neon/10 py-3 text-center font-bold text-neon transition hover:bg-neon/20"
+              >
+                ✨ Purchase Campaign Token Now
+              </a>
+            ) : (
+              <p className="mt-5 rounded-lg bg-secondary px-4 py-3 text-center text-sm text-muted-foreground">
+                Campaign purchases are not configured for this report yet.
+              </p>
+            )}
             <p className="mt-4 text-center text-xs text-muted-foreground">Already have a token?</p>
             <div className="mt-2 flex gap-2">
               <input
