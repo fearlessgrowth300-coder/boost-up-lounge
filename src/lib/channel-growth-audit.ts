@@ -77,9 +77,6 @@ export function getAuditActionPlan(issue: GrowthAuditItem) {
 export function calculateHealthScore(issues: GrowthAuditItem[], completedIds: string[] = []) {
   const completed = new Set(completedIds);
   const penalty = issues.reduce((total, issue) => {
-    // A recommendation is useful guidance, not a measured defect. It must never
-    // reduce a channel's evidence-based score.
-    if (getAuditClassification(issue) !== "verified") return total;
     if (completed.has(issue.id)) return total;
     const measuredPenalty: Record<string, number> = {
       "channel-offline": 18,
