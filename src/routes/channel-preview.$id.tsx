@@ -161,6 +161,7 @@ export function ChannelReport({ identifier }: { identifier: string }) {
     }, {}),
   );
   const parent = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  const isTwitch = channel.platform === "twitch";
   const playerUrl = `https://player.twitch.tv/?channel=${encodeURIComponent(channel.username)}&parent=${encodeURIComponent(parent)}`;
   const chatUrl = `https://www.twitch.tv/embed/${encodeURIComponent(channel.username)}/chat?parent=${encodeURIComponent(parent)}`;
 
@@ -266,27 +267,40 @@ export function ChannelReport({ identifier }: { identifier: string }) {
             </div>
           </div>
           <div className="border-t border-border p-6">
-            <GameIntelligencePanel category={channel.platform === "twitch" ? channel.current_category : null} />
+            <GameIntelligencePanel category={channel.current_category} />
           </div>
-          <div className="grid gap-4 border-t border-border p-6 md:grid-cols-2">
-            <OfflineCover offline={!channel.is_live}>
-              <iframe
-                title="Twitch stream"
-                src={playerUrl}
-                className="aspect-video w-full"
-                allowFullScreen
-              />
-            </OfflineCover>
-            <OfflineCover offline={!channel.is_live}>
-              <iframe title="Twitch chat" src={chatUrl} className="aspect-video w-full" />
-            </OfflineCover>
-          </div>
+          {isTwitch ? (
+            <div className="grid gap-4 border-t border-border p-6 md:grid-cols-2">
+              <OfflineCover offline={!channel.is_live}>
+                <iframe
+                  title="Twitch stream"
+                  src={playerUrl}
+                  className="aspect-video w-full"
+                  allowFullScreen
+                />
+              </OfflineCover>
+              <OfflineCover offline={!channel.is_live}>
+                <iframe title="Twitch chat" src={chatUrl} className="aspect-video w-full" />
+              </OfflineCover>
+            </div>
+          ) : (
+            <div className="border-t border-border p-6">
+              <a
+                href={channel.channel_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex rounded-lg bg-neon px-4 py-2 font-bold text-primary-foreground"
+              >
+                Open {channel.platform === "kick" ? "Kick" : channel.platform} channel
+              </a>
+            </div>
+          )}
         </section>
 
         <section className="sb-card p-6">
           <h2 className="font-display text-xl font-bold">Recent Broadcasts</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Latest public Twitch broadcasts and performance.
+            Latest public broadcasts and performance.
           </p>
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {recentVideos.length ? (

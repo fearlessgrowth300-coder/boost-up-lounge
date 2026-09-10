@@ -187,7 +187,7 @@ export const submitChannel = createServerFn({ method: "POST" })
     const parsed = parseChannelUrl(data.url);
     if (!parsed) throw new Error("Enter a valid Twitch, Kick or YouTube channel URL.");
 
-    const stats = await fetchTwitchStats(parsed.platform, parsed.username);
+    const stats = await fetchChannelStats(parsed.platform, parsed.username);
 
     const { data: row, error } = await context.supabase
       .from("channels")
@@ -259,7 +259,7 @@ export const createBulkCampaigns = createServerFn({ method: "POST" })
     const created: Array<{ id: string; username: string; platform: string }> = [];
 
     for (const parsed of parsedChannels) {
-      const stats = await fetchTwitchStats(parsed.platform, parsed.username);
+      const stats = await fetchChannelStats(parsed.platform, parsed.username);
       const { data: row, error } = await context.supabase
         .from("channels")
         .upsert(
@@ -764,7 +764,7 @@ export const refreshChannel = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
-    const stats = await fetchTwitchStats(row.platform, row.username);
+    const stats = await fetchChannelStats(row.platform, row.username);
     const { error: updateError } = await context.supabase
       .from("channels")
       .update({
@@ -833,7 +833,7 @@ export const autoRefreshChannels = createServerFn({ method: "POST" })
     const failures: string[] = [];
     for (const channel of channels ?? []) {
       try {
-        const stats = await fetchTwitchStats(channel.platform, channel.username);
+        const stats = await fetchChannelStats(channel.platform, channel.username);
         const checkedAt = new Date().toISOString();
         const { error: updateError } = await context.supabase
           .from("channels")
@@ -1042,8 +1042,8 @@ type Stats = {
   aiInsights: string[];
 };
 
-async function fetchTwitchStats(platform: string, username: string): Promise<Stats> {
-  const empty: Stats = {
+function emptyStats(): Stats {
+  return {
     followers: 0,
     isLive: false,
     viewers: 0,
@@ -1059,7 +1059,15 @@ async function fetchTwitchStats(platform: string, username: string): Promise<Sta
     scheduleVacation: null,
     aiInsights: [],
   };
-  if (platform !== "twitch") return empty;
+}
+
+async function fetchChannelStats(platform: string, username: string): Promise<Stats> {
+  if (platform === "twitch") return fetchTwitchStats(username);
+  if (platform === "kick") return fetchKickStats(username);
+  return emptyStats();
+}
+
+async function fetchTwitchStats(username: string): Promise<Stats> {
 
   const clientId = process.env["TWITCH_CLIENT_ID"];
   const clientSecret = process.env["TWITCH_CLIENT_SECRET"];
@@ -1208,10 +1216,94 @@ async function getTwitchAppToken(clientId: string, clientSecret: string) {
       grant_type: "client_credentials",
     }),
   });
-  if (!response.ok) throw new Error(`Twitch authentication failed [${response.status}]`);
+  if (!response.ok) {
+    throw new Error(
+      `Twitch authentication failed [${response.status}]. Create a new Twitch client secret and update TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET on the server.`,
+    );
+  }
   const data = (await response.json()) as { access_token: string; expires_in: number };
   twitchTokenCache = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
   return data.access_token;
+}
+
+let kickTokenCache: { token: string; expiresAt: number } | null = null;
+
+async function getKickAppToken(clientId: string, clientSecret: string) {
+  if (kickTokenCache && kickTokenCache.expiresAt > Date.now() + 60_000) {
+    return kickTokenCache.token;
+  }
+  const response = await fetch("https://id.kick.com/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "client_credentials",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Kick authentication failed [${response.status}]. Check KICK_CLIENT_ID and KICK_CLIENT_SECRET.`);
+  }
+  const data = (await response.json()) as { access_token: string; expires_in: number };
+  kickTokenCache = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  return data.access_token;
+}
+
+async function fetchKickStats(username: string): Promise<Stats> {
+  const clientId = process.env["KICK_CLIENT_ID"];
+  const clientSecret = process.env["KICK_CLIENT_SECRET"];
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Kick API credentials are not configured on the server. Add KICK_CLIENT_ID and KICK_CLIENT_SECRET from dev.kick.com.",
+    );
+  }
+
+  try {
+    const accessToken = await getKickAppToken(clientId, clientSecret);
+    const response = await fetch(
+      `https://api.kick.com/public/v1/channels?slug=${encodeURIComponent(username)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!response.ok) throw new Error(`Kick channel lookup failed [${response.status}].`);
+    const payload = (await response.json()) as {
+      data?: Array<{
+        banner_picture?: string | null;
+        channel_description?: string | null;
+        category?: { name?: string | null } | null;
+        stream?: { is_live?: boolean; viewer_count?: number } | null;
+        stream_title?: string | null;
+      }>;
+    };
+    const channel = payload.data?.[0];
+    if (!channel) throw new Error(`Kick channel @${username} was not found.`);
+    const isLive = Boolean(channel.stream?.is_live);
+    const viewers = channel.stream?.viewer_count ?? 0;
+    const currentCategory = channel.category?.name ?? null;
+    const currentTitle = channel.stream_title ?? null;
+    const aiInsights = await generateGeminiInsights({
+      username,
+      followers: 0,
+      isLive,
+      viewers,
+      currentCategory,
+      recentCategories: currentCategory ? [currentCategory] : [],
+      recentVideos: [],
+    });
+    return {
+      ...emptyStats(),
+      isLive,
+      viewers,
+      bannerUrl: channel.banner_picture ?? null,
+      description: channel.channel_description ?? null,
+      currentCategory,
+      currentTitle,
+      recentCategories: currentCategory ? [currentCategory] : [],
+      aiInsights,
+    };
+  } catch (err) {
+    console.error("Kick lookup failed", err);
+    throw err instanceof Error ? err : new Error("Kick lookup failed.");
+  }
 }
 
 async function generateGeminiInsights(input: {

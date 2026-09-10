@@ -673,7 +673,7 @@ function ChannelAnalysis({
             </div>
           </div>
           <div className="mt-4">
-            <GameIntelligencePanel category={channel.platform === "twitch" ? channel.current_category : null} />
+            <GameIntelligencePanel category={channel.current_category} />
           </div>
         </section>
       )}
